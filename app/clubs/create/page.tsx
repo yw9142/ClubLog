@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { ArrowLeft } from "lucide-react"
+import { supabase } from "@/lib/supabase" // Supabase 클라이언트 import
 
 export default function CreateClubPage() {
   const [name, setName] = useState("")
@@ -24,8 +25,46 @@ export default function CreateClubPage() {
     setIsLoading(true)
 
     try {
-      // 실제 구현에서는 API 호출로 동아리 생성
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      // 현재 로그인한 사용자 정보 가져오기
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (!user) {
+        toast({
+          title: "로그인 필요",
+          description: "동아리를 생성하려면 로그인이 필요합니다.",
+          variant: "destructive",
+        })
+        router.push("/login")
+        return
+      }
+
+      // 동아리 생성
+      const { data: club, error: clubError } = await supabase
+        .from('clubs')
+        .insert([
+          {
+            name,
+            description,
+            created_by: user.id
+          }
+        ])
+        .select()
+        .single()
+
+      if (clubError) throw clubError
+
+      // 생성자를 관리자로 등록
+      const { error: memberError } = await supabase
+        .from('club_members')
+        .insert([
+          {
+            club_id: club.id,
+            user_id: user.id,
+            role: 'admin'
+          }
+        ])
+
+      if (memberError) throw memberError
 
       toast({
         title: "동아리 생성 완료",
@@ -33,10 +72,10 @@ export default function CreateClubPage() {
       })
 
       router.push("/clubs")
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "동아리 생성 실패",
-        description: "다시 시도해주세요.",
+        description: error.message || "다시 시도해주세요.",
         variant: "destructive",
       })
     } finally {

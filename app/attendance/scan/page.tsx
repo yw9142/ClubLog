@@ -6,103 +6,213 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { ArrowLeft, Camera, CameraOff } from "lucide-react"
+import { Html5QrcodeScanner } from 'html5-qrcode'
+import { supabase } from "@/lib/supabase"
 
 export default function ScanQRPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const clubId = searchParams.get("clubId")
+  const sessionId = searchParams.get("session")
   const { toast } = useToast()
 
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const [scanning, setScanning] = useState(false)
   const [cameraError, setCameraError] = useState(false)
   const [scanned, setScanned] = useState(false)
+  const [processingAttendance, setProcessingAttendance] = useState(false)
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null)
 
+  // QR 스캐너 초기화
   useEffect(() => {
-    let stream: MediaStream | null = null
+    if (scanned || scannerRef.current) return
 
-    const startCamera = async () => {
+    // 스캐너가 표시될 HTML 요소의 ID
+    const qrScannerId = 'html5-qrcode-scanner';
+    
+    // 스캐너 초기화
+    scannerRef.current = new Html5QrcodeScanner(
+      qrScannerId,
+      {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        rememberLastUsedCamera: true,
+        showTorchButtonIfSupported: true
+      },
+      /* verbose= */ false
+    );
+
+    // QR 코드 스캐닝 성공 핸들러
+    const onScanSuccess = async (decodedText: string, decodedResult: any) => {
+      console.log(`QR 코드 스캔 성공: ${decodedText}`, decodedResult);
+      
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-        })
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          setScanning(true)
-          setCameraError(false)
+        // 스캐너 중지
+        if (scannerRef.current) {
+          scannerRef.current.clear();
+          scannerRef.current = null;
         }
-      } catch (error) {
-        console.error("카메라 접근 오류:", error)
-        setCameraError(true)
-        setScanning(false)
-      }
-    }
+        setScanned(true);
+        setProcessingAttendance(true);
+        
+        // QR 코드 데이터 분석
+        let url;
+        try {
+          url = new URL(decodedText);
+        } catch (error) {
+          throw new Error("유효하지 않은 QR 코드입니다.");
+        }
+        
+        // URL 파라미터 추출
+        const params = url.searchParams;
+        const scannedSessionId = params.get('session');
+        
+        if (!scannedSessionId) {
+          throw new Error("출석 세션 정보가 없는 QR 코드입니다.");
+        }
+        
+        // 현재 사용자 정보 가져오기
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          toast({
+            title: "로그인 필요",
+            description: "출석 체크를 하려면 로그인이 필요합니다.",
+            variant: "destructive",
+          });
+          router.push("/login");
+          return;
+        }
 
-    if (!scanned) {
-      startCamera()
-    }
-
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop())
-      }
-    }
-  }, [scanned])
-
-  useEffect(() => {
-    if (!scanning || scanned || !videoRef.current || !canvasRef.current) return
-
-    const checkQRCode = () => {
-      if (!videoRef.current || !canvasRef.current || scanned) return
-
-      const video = videoRef.current
-      const canvas = canvasRef.current
-      const context = canvas.getContext("2d")
-
-      if (context && video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.height = video.videoHeight
-        canvas.width = video.videoWidth
-        context.drawImage(video, 0, 0, canvas.width, canvas.height)
-
-        // 실제 구현에서는 여기서 QR 코드 디코딩 라이브러리 사용 (예: jsQR)
-        // 여기서는 시뮬레이션을 위해 5초 후 성공으로 처리
+        // 세션 정보 확인
+        const { data: sessionData, error: sessionError } = await supabase
+          .from('attendance_sessions')
+          .select('*')
+          .eq('id', scannedSessionId)
+          .single();
+          
+        if (sessionError || !sessionData) {
+          throw new Error("유효하지 않은 출석 세션입니다.");
+        }
+        
+        // 현재 시간이 출석 세션 시간 내에 있는지 확인
+        const now = new Date();
+        const startTime = new Date(sessionData.start_time);
+        const endTime = new Date(sessionData.end_time);
+        
+        // 해당 클럽 멤버인지 확인
+        const { data: memberData, error: memberError } = await supabase
+          .from('club_members')
+          .select('*')
+          .eq('club_id', sessionData.club_id)
+          .eq('user_id', user.id)
+          .maybeSingle();
+          
+        if (memberError || !memberData) {
+          throw new Error("이 동아리의 멤버가 아닙니다.");
+        }
+        
+        // 출석 상태 결정
+        let attendanceStatus = 'absent';
+        if (now >= startTime && now <= endTime) {
+          // 시작 시간 기준으로 30분 이내면 제시간, 그 이후면 지각
+          const lateThreshold = new Date(startTime.getTime() + 30 * 60000); // 30분
+          attendanceStatus = now <= lateThreshold ? 'present' : 'late';
+        } else if (now < startTime) {
+          attendanceStatus = 'present'; // 일찍 온 경우도 출석으로 처리
+        } else {
+          throw new Error("출석 시간이 지났습니다.");
+        }
+        
+        // 이미 출석했는지 확인
+        const { data: existingAttendance, error: existingError } = await supabase
+          .from('attendances')
+          .select('*')
+          .eq('session_id', scannedSessionId)
+          .eq('user_id', user.id)
+          .maybeSingle();
+          
+        if (existingAttendance) {
+          throw new Error("이미 출석 처리되었습니다.");
+        }
+        
+        // 출석 기록 저장
+        const { error: attendanceError } = await supabase
+          .from('attendances')
+          .insert([{
+            session_id: scannedSessionId,
+            user_id: user.id,
+            status: attendanceStatus,
+            check_in_time: new Date().toISOString(),
+          }]);
+          
+        if (attendanceError) {
+          throw new Error("출석 처리 중 오류가 발생했습니다.");
+        }
+        
+        toast({
+          title: "출석 체크 성공",
+          description: attendanceStatus === 'present' ? 
+            "출석이 정상적으로 처리되었습니다." : 
+            "지각으로 처리되었습니다.",
+        });
+        
+      } catch (error: any) {
+        console.error('출석 처리 오류:', error);
+        setScanned(false);
+        
+        toast({
+          title: "출석 체크 실패",
+          description: error.message || "QR 코드 처리 중 오류가 발생했습니다.",
+          variant: "destructive",
+        });
+        
+        // 스캐너 다시 시작
         setTimeout(() => {
-          if (!scanned) {
-            handleSuccessfulScan()
-          }
-        }, 5000)
+          initScanner();
+        }, 2000);
+      } finally {
+        setProcessingAttendance(false);
       }
-    }
+    };
 
-    const intervalId = setInterval(checkQRCode, 500)
+    // QR 코드 스캐닝 실패 핸들러
+    const onScanFailure = (error: any) => {
+      // 실패는 무시 (계속 스캐닝)
+      console.log('QR 스캐닝 중...', error);
+    };
+
+    // 스캐너 초기화 함수
+    const initScanner = () => {
+      if (!scannerRef.current) {
+        scannerRef.current = new Html5QrcodeScanner(
+          qrScannerId,
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            rememberLastUsedCamera: true,
+            showTorchButtonIfSupported: true
+          },
+          /* verbose= */ false
+        );
+        scannerRef.current.render(onScanSuccess, onScanFailure);
+        setScanning(true);
+      }
+    };
+
+    // 스캐너 시작
+    initScanner();
 
     return () => {
-      clearInterval(intervalId)
-    }
-  }, [scanning, scanned])
-
-  const handleSuccessfulScan = () => {
-    setScanned(true)
-    setScanning(false)
-
-    // 실제 구현에서는 스캔된 QR 코드 데이터를 서버로 전송하여 출석 처리
-    toast({
-      title: "출석 체크 성공",
-      description: "출석이 정상적으로 처리되었습니다.",
-    })
-
-    // 스트림 중지
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream
-      stream.getTracks().forEach((track) => track.stop())
-    }
-  }
+      if (scannerRef.current) {
+        scannerRef.current.clear();
+        scannerRef.current = null;
+      }
+    };
+  }, [scanned, toast, router]);
 
   const handleScanAgain = () => {
-    setScanned(false)
-  }
+    setScanned(false);
+  };
 
   return (
     <div className="container mx-auto p-4 md:p-6 max-w-2xl">
@@ -119,16 +229,7 @@ export default function ScanQRPage() {
           <CardDescription>관리자가 보여주는 QR 코드를 스캔하여 출석을 체크하세요</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center">
-          {cameraError ? (
-            <div className="text-center p-4 sm:p-8 border rounded-lg bg-gray-50 w-full">
-              <CameraOff className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              <h3 className="text-lg font-medium mb-2">카메라를 사용할 수 없습니다</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                카메라 접근 권한을 확인하거나 다른 기기에서 시도해보세요.
-              </p>
-              <Button onClick={() => window.location.reload()}>다시 시도</Button>
-            </div>
-          ) : scanned ? (
+          {scanned ? (
             <div className="text-center p-4 sm:p-8 border rounded-lg bg-green-50 w-full">
               <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
                 <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -139,28 +240,19 @@ export default function ScanQRPage() {
               <p className="text-sm text-muted-foreground mb-4">출석이 성공적으로 처리되었습니다.</p>
               <Button onClick={handleScanAgain}>다시 스캔하기</Button>
             </div>
+          ) : processingAttendance ? (
+            <div className="text-center p-4 sm:p-8 border rounded-lg bg-blue-50 w-full">
+              <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4">
+                <svg className="h-8 w-8 text-blue-600 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+              <h3 className="text-lg font-medium mb-2">출석 처리 중...</h3>
+              <p className="text-sm text-muted-foreground mb-4">잠시만 기다려주세요.</p>
+            </div>
           ) : (
-            <>
-              <div className="relative w-full max-w-sm aspect-square mb-4 bg-black rounded-lg overflow-hidden">
-                <video
-                  ref={videoRef}
-                  className="absolute inset-0 w-full h-full object-cover"
-                  autoPlay
-                  playsInline
-                  muted
-                />
-                <canvas ref={canvasRef} className="hidden" />
-                <div className="absolute inset-0 border-2 border-white/50 rounded-lg"></div>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-48 h-48 border-2 border-blue-500 rounded-lg"></div>
-                </div>
-              </div>
-              <p className="text-sm text-center text-muted-foreground mb-2">QR 코드를 프레임 안에 위치시키세요</p>
-              <div className="flex items-center">
-                <Camera className="h-4 w-4 mr-2 text-blue-600 animate-pulse" />
-                <span className="text-sm font-medium">스캔 중...</span>
-              </div>
-            </>
+            <div id="html5-qrcode-scanner" className="w-full"></div>
           )}
         </CardContent>
         <CardFooter className="flex justify-center">

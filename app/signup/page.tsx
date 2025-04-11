@@ -1,7 +1,5 @@
 "use client"
 
-import type React from "react"
-
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -10,9 +8,10 @@ import Link from "next/link"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/use-toast"
+import { signUp } from "@/lib/supabase"
 
 export default function SignupPage() {
-  const [userId, setUserId] = useState("")
+  const [email, setEmail] = useState("")
   const [name, setName] = useState("")
   const [school, setSchool] = useState("")
   const [department, setDepartment] = useState("")
@@ -36,21 +35,38 @@ export default function SignupPage() {
 
     setIsLoading(true)
 
-    // 실제 구현에서는 Supabase나 다른 인증 서비스를 사용하여 회원가입 처리
     try {
-      // 회원가입 성공 시뮬레이션 (실제 구현에서는 API 호출)
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      console.log('회원가입 정보:', { email, name, school, department })
+      
+      // Supabase Auth 회원가입 처리
+      const { data, error } = await signUp({
+        email,
+        password,
+        metadata: {
+          full_name: name,
+          school,
+          department
+        }
+      })
+
+      if (error) {
+        console.error('회원가입 실패 상세:', error)
+        throw error
+      }
+      
+      console.log('회원가입 성공:', data)
 
       toast({
-        title: "회원가입 성공",
-        description: "로그인 페이지로 이동합니다.",
+        title: "회원가입 이메일 발송됨",
+        description: "이메일에 포함된 링크를 클릭하여 계정을 활성화해 주세요.",
       })
 
       router.push("/login")
-    } catch (error) {
+    } catch (error: any) {
+      console.error('회원가입 예외:', error)
       toast({
         title: "회원가입 실패",
-        description: "다시 시도해주세요.",
+        description: error.message || "다시 시도해주세요.",
         variant: "destructive",
       })
     } finally {
@@ -83,24 +99,31 @@ export default function SignupPage() {
           <form onSubmit={handleSignup}>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="userId">아이디</Label>
+                <Label htmlFor="email">이메일</Label>
                 <Input
-                  id="userId"
-                  placeholder="사용할 아이디를 입력하세요"
-                  value={userId}
-                  onChange={(e) => setUserId(e.target.value)}
+                  id="email"
+                  type="email"
+                  placeholder="your.email@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   required
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="name">이름</Label>
-                <Input id="name" placeholder="홍길동" value={name} onChange={(e) => setName(e.target.value)} required />
+                <Input 
+                  id="name" 
+                  placeholder="홍길동" 
+                  value={name} 
+                  onChange={(e) => setName(e.target.value)} 
+                  required 
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="school">학교</Label>
                 <Input
                   id="school"
-                  placeholder="서울대학교"
+                  placeholder="한국외국어대학교"
                   value={school}
                   onChange={(e) => setSchool(e.target.value)}
                   required

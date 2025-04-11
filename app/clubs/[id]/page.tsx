@@ -1,56 +1,148 @@
-import type React from "react"
+"use client"
+
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import Link from "next/link"
 import { CalendarDays, Copy, QrCode, Users } from "lucide-react"
+import { supabase } from "@/lib/supabase"
+import { Club, ClubMember, Profile, AttendanceSession } from "@/lib/types"
+import { useToast } from "@/components/ui/use-toast"
+import { useRouter } from "next/navigation"
 
 export default function ClubDetailPage({ params }: { params: { id: string } }) {
   const clubId = params.id
+  const [club, setClub] = useState<Club | null>(null)
+  const [role, setRole] = useState<string>("")
+  const [memberCount, setMemberCount] = useState(0)
+  const [members, setMembers] = useState<(ClubMember & { profile: Profile })[]>([])
+  const [sessions, setSessions] = useState<AttendanceSession[]>([])
+  const [loading, setLoading] = useState(true)
+  const [inviteLink, setInviteLink] = useState("")
+  const { toast } = useToast()
+  const router = useRouter()
 
-  // 실제 구현에서는 API를 통해 데이터를 가져와야 함
-  const club = {
-    id: Number.parseInt(clubId),
-    name: "프로그래밍 동아리",
-    description:
-      "코딩과 프로그래밍에 관심 있는 사람들의 모임입니다. 주 1회 모임을 통해 다양한 프로그래밍 주제에 대해 학습하고 토론합니다.",
-    memberCount: 24,
-    role: "관리자", // 또는 "회원"
-    inviteLink: "https://example.com/invite/abc123",
-    members: [
-      {
-        id: 1,
-        name: "홍길동",
-        role: "관리자",
-        joinedAt: "2025-01-15",
-        school: "서울대학교",
-        department: "컴퓨터공학과",
-      },
-      {
-        id: 2,
-        name: "김철수",
-        role: "회원",
-        joinedAt: "2025-01-20",
-        school: "연세대학교",
-        department: "정보통신공학과",
-      },
-      {
-        id: 3,
-        name: "이영희",
-        role: "회원",
-        joinedAt: "2025-02-05",
-        school: "고려대학교",
-        department: "소프트웨어학과",
-      },
-    ],
-    sessions: [
-      { id: 1, name: "4월 첫째주 모임", date: "2025-04-05", attendanceCount: 20 },
-      { id: 2, name: "4월 둘째주 모임", date: "2025-04-12", attendanceCount: 18 },
-      { id: 3, name: "4월 셋째주 모임", date: "2025-04-19", attendanceCount: 22 },
-    ],
+  useEffect(() => {
+    async function fetchClubDetails() {
+      try {
+        // 현재 로그인한 사용자 정보 가져오기
+        const { data: { user } } = await supabase.auth.getUser()
+        
+        if (!user) {
+          toast({
+            title: "로그인 필요",
+            description: "동아리 정보를 보려면 로그인이 필요합니다.",
+            variant: "destructive",
+          })
+          router.push("/login")
+          return
+        }
+
+        // 동아리 정보 가져오기
+        const { data: clubData, error: clubError } = await supabase
+          .from('clubs')
+          .select('*')
+          .eq('id', clubId)
+          .single()
+
+        if (clubError) throw clubError
+        setClub(clubData)
+
+        // 사용자 역할 확인
+        const { data: membership, error: membershipError } = await supabase
+          .from('club_members')
+          .select('role')
+          .eq('club_id', clubId)
+          .eq('user_id', user.id)
+          .single()
+
+        if (membershipError && membershipError.code !== 'PGRST116') { // PGRST116는 결과가 없을 때 오류 코드
+          throw membershipError
+        }
+
+        setRole(membership?.role === 'admin' ? '관리자' : '회원')
+
+        // 멤버 수 가져오기
+        const { count, error: countError } = await supabase
+          .from('club_members')
+          .select('*', { count: 'exact', head: true })
+          .eq('club_id', clubId)
+
+        if (countError) throw countError
+        setMemberCount(count || 0)
+
+        // 동아리 멤버 목록 가져오기
+        const { data: memberData, error: memberError } = await supabase
+          .from('club_members')
+          .select(`
+            *,
+            profile:profiles(*)
+          `)
+          .eq('club_id', clubId)
+
+        if (memberError) throw memberError
+        setMembers(memberData as any)
+
+        // 출석 세션 목록 가져오기
+        const { data: sessionData, error: sessionError } = await supabase
+          .from('attendance_sessions')
+          .select('*')
+          .eq('club_id', clubId)
+          .order('start_time', { ascending: false })
+
+        if (sessionError) throw sessionError
+        setSessions(sessionData)
+
+        // 초대 링크 생성 (실제로는 초대 링크 생성 로직이 필요함)
+        setInviteLink(`${window.location.origin}/clubs/join?id=${clubId}`)
+
+      } catch (error: any) {
+        toast({
+          title: "데이터 로딩 실패",
+          description: error.message,
+          variant: "destructive",
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchClubDetails()
+  }, [clubId, toast, router])
+
+  // 초대 링크 복사 함수
+  const copyInviteLink = () => {
+    navigator.clipboard.writeText(inviteLink)
+    toast({
+      title: "링크 복사됨",
+      description: "초대 링크가 클립보드에 복사되었습니다.",
+    })
   }
 
-  const isAdmin = club.role === "관리자"
+  const isAdmin = role === "관리자"
+
+  if (loading) {
+    return (
+      <div className="container mx-auto p-4 md:p-6 flex justify-center items-center h-[70vh]">
+        <p>동아리 정보를 불러오는 중...</p>
+      </div>
+    )
+  }
+
+  if (!club) {
+    return (
+      <div className="container mx-auto p-4 md:p-6 flex justify-center items-center h-[70vh]">
+        <div className="text-center">
+          <h2 className="text-xl font-bold mb-2">동아리를 찾을 수 없습니다</h2>
+          <p className="text-muted-foreground mb-4">요청한 동아리가 존재하지 않거나 접근 권한이 없습니다.</p>
+          <Button asChild>
+            <Link href="/clubs">동아리 목록으로 돌아가기</Link>
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="container mx-auto p-4 md:p-6">
@@ -89,7 +181,7 @@ export default function ClubDetailPage({ params }: { params: { id: string } }) {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{club.memberCount}</div>
+            <div className="text-2xl font-bold">{memberCount}</div>
             <p className="text-xs text-muted-foreground">가입한 멤버 수</p>
           </CardContent>
         </Card>
@@ -99,7 +191,7 @@ export default function ClubDetailPage({ params }: { params: { id: string } }) {
             <CalendarDays className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{club.sessions.length}</div>
+            <div className="text-2xl font-bold">{sessions.length}</div>
             <p className="text-xs text-muted-foreground">생성된 출석 세션 수</p>
           </CardContent>
         </Card>
@@ -109,7 +201,7 @@ export default function ClubDetailPage({ params }: { params: { id: string } }) {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{club.role}</div>
+            <div className="text-2xl font-bold">{role || "게스트"}</div>
             <p className="text-xs text-muted-foreground">동아리 내 역할</p>
           </CardContent>
         </Card>
@@ -123,8 +215,8 @@ export default function ClubDetailPage({ params }: { params: { id: string } }) {
           </CardHeader>
           <CardContent>
             <div className="flex flex-col sm:flex-row items-center gap-2">
-              <Input value={club.inviteLink} readOnly className="flex-1" />
-              <Button variant="outline" size="icon" className="shrink-0">
+              <Input value={inviteLink} readOnly className="flex-1" />
+              <Button variant="outline" size="icon" className="shrink-0" onClick={copyInviteLink}>
                 <Copy className="h-4 w-4" />
               </Button>
             </div>
@@ -148,26 +240,32 @@ export default function ClubDetailPage({ params }: { params: { id: string } }) {
               <CardDescription>동아리에 가입한 멤버 목록</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {club.members.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border rounded-lg"
-                  >
-                    <div className="mb-2 sm:mb-0">
-                      <h3 className="font-medium">{member.name}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        {member.school} {member.department} • {member.role} • 가입일: {member.joinedAt}
-                      </p>
+              {members.length > 0 ? (
+                <div className="space-y-4">
+                  {members.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border rounded-lg"
+                    >
+                      <div className="mb-2 sm:mb-0">
+                        <h3 className="font-medium">{member.profile?.full_name || "이름 없음"}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {member.profile?.email} • {member.role === 'admin' ? '관리자' : '회원'} • 가입일: {new Date(member.joined_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      {isAdmin && member.role !== "admin" && (
+                        <Button variant="outline" size="sm" className="self-start sm:self-auto" asChild>
+                          <Link href={`/clubs/${clubId}/manage`}>관리</Link>
+                        </Button>
+                      )}
                     </div>
-                    {isAdmin && member.role !== "관리자" && (
-                      <Button variant="outline" size="sm" className="self-start sm:self-auto" asChild>
-                        <Link href={`/clubs/${clubId}/manage`}>관리</Link>
-                      </Button>
-                    )}
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6">
+                  <p className="text-muted-foreground">아직 멤버가 없습니다.</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -178,24 +276,40 @@ export default function ClubDetailPage({ params }: { params: { id: string } }) {
               <CardDescription>생성된 출석 세션 목록</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {club.sessions.map((session) => (
-                  <div
-                    key={session.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border rounded-lg"
-                  >
-                    <div className="mb-2 sm:mb-0">
-                      <h3 className="font-medium">{session.name}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        {session.date} • 출석: {session.attendanceCount}명
-                      </p>
+              {sessions.length > 0 ? (
+                <div className="space-y-4">
+                  {sessions.map((session) => (
+                    <div
+                      key={session.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border rounded-lg"
+                    >
+                      <div className="mb-2 sm:mb-0">
+                        <h3 className="font-medium">{session.title}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {new Date(session.start_time).toLocaleDateString()} {new Date(session.start_time).toLocaleTimeString()} 
+                          ~ {new Date(session.end_time).toLocaleTimeString()}
+                          {session.location && ` • ${session.location}`}
+                        </p>
+                      </div>
+                      <Button variant="outline" size="sm" className="self-start sm:self-auto" asChild>
+                        <Link href={`/attendance/${session.id}`}>상세보기</Link>
+                      </Button>
                     </div>
-                    <Button variant="outline" size="sm" className="self-start sm:self-auto" asChild>
-                      <Link href={`/attendance/${session.id}`}>상세보기</Link>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6">
+                  <p className="text-muted-foreground">아직 생성된 출석 세션이 없습니다.</p>
+                  {isAdmin && (
+                    <Button className="mt-4" asChild>
+                      <Link href={`/attendance/create?clubId=${clubId}`}>
+                        <CalendarDays className="mr-2 h-4 w-4" />
+                        출석 세션 생성
+                      </Link>
                     </Button>
-                  </div>
-                ))}
-              </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

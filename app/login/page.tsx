@@ -1,7 +1,5 @@
 "use client"
 
-import type React from "react"
-
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -10,9 +8,10 @@ import Link from "next/link"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/use-toast"
+import { signIn } from "@/lib/supabase"
 
 export default function LoginPage() {
-  const [userId, setUserId] = useState("")
+  const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
@@ -22,21 +21,33 @@ export default function LoginPage() {
     e.preventDefault()
     setIsLoading(true)
 
-    // 실제 구현에서는 Supabase나 다른 인증 서비스를 사용하여 로그인 처리
     try {
-      // 로그인 성공 시뮬레이션 (실제 구현에서는 API 호출)
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      console.log('로그인 시도:', { email })
+      
+      const { data, error } = await signIn({
+        email,
+        password
+      })
+
+      if (error) {
+        console.error('로그인 실패:', error)
+        throw error
+      }
+
+      console.log('로그인 성공:', data)
 
       toast({
         title: "로그인 성공",
         description: "대시보드로 이동합니다.",
       })
-
+      
       router.push("/dashboard")
-    } catch (error) {
+      router.refresh()
+    } catch (error: any) {
+      console.error('로그인 실패:', error)
       toast({
         title: "로그인 실패",
-        description: "아이디 또는 비밀번호를 확인해주세요.",
+        description: error.message || "이메일 또는 비밀번호를 확인해주세요.",
         variant: "destructive",
       })
     } finally {
@@ -64,27 +75,23 @@ export default function LoginPage() {
         <Card className="w-full max-w-md">
           <CardHeader className="space-y-1">
             <CardTitle className="text-2xl font-bold text-center">로그인</CardTitle>
-            <CardDescription className="text-center">계정 정보를 입력하여 로그인하세요</CardDescription>
+            <CardDescription className="text-center">아래 정보를 입력하여 로그인하세요</CardDescription>
           </CardHeader>
           <form onSubmit={handleLogin}>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="userId">아이디</Label>
+                <Label htmlFor="email">이메일</Label>
                 <Input
-                  id="userId"
-                  placeholder="아이디를 입력하세요"
-                  value={userId}
-                  onChange={(e) => setUserId(e.target.value)}
+                  id="email"
+                  type="email"
+                  placeholder="your.email@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   required
                 />
               </div>
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password">비밀번호</Label>
-                  <Link href="/forgot-password" className="text-sm text-blue-600 hover:underline">
-                    비밀번호 찾기
-                  </Link>
-                </div>
+                <Label htmlFor="password">비밀번호</Label>
                 <Input
                   id="password"
                   type="password"
@@ -92,6 +99,11 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                 />
+                <div className="text-right text-sm">
+                  <Link href="/forgot-password" className="text-blue-600 hover:underline">
+                    비밀번호를 잊으셨나요?
+                  </Link>
+                </div>
               </div>
             </CardContent>
             <CardFooter className="flex flex-col space-y-4">
