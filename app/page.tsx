@@ -3,7 +3,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import Link from "next/link"
 import { CheckCircle, QrCode, Users } from "lucide-react"
 
+
 export default function Home() {
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
       <header className="container mx-auto py-6 px-4">

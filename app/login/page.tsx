@@ -60,7 +60,7 @@ export default function LoginPage() {
     <div>
       <header className="container mx-auto py-6 px-4">
         <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-blue-700">동아리 출석 체크</h1>
+          <h1 className="text-2xl font-bold text-blue-700 cursor-pointer" onClick={() => router.push("/")}>동아리 출석 체크</h1>
           <div className="space-x-2">
             <Button variant="outline" asChild>
               <Link href="/login">로그인</Link>
