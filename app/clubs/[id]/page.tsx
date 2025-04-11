@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { use, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -11,8 +11,11 @@ import { Club, ClubMember, Profile, AttendanceSession } from "@/lib/types"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
 
-export default function ClubDetailPage({ params }: { params: { id: string } }) {
-  const clubId = params.id
+type Params = { id: string } | Promise<{ id: string }>
+
+export default function ClubDetailPage({ params }: { params: Params }) {
+  const unwrappedParams = params instanceof Promise ? use(params) : params
+  const clubId = unwrappedParams.id
   const [club, setClub] = useState<Club | null>(null)
   const [role, setRole] = useState<string>("")
   const [memberCount, setMemberCount] = useState(0)

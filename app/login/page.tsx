@@ -9,17 +9,21 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/use-toast"
 import { signIn } from "@/lib/supabase"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { AlertCircle } from "lucide-react"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const router = useRouter()
   const { toast } = useToast()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
+    setErrorMessage(null) // 이전 오류 메시지 초기화
 
     try {
       console.log('로그인 시도:', { email })
@@ -31,6 +35,7 @@ export default function LoginPage() {
 
       if (error) {
         console.error('로그인 실패:', error)
+        setErrorMessage(error.message || "이메일 또는 비밀번호가 올바르지 않습니다.")
         throw error
       }
 
@@ -45,11 +50,7 @@ export default function LoginPage() {
       router.refresh()
     } catch (error: any) {
       console.error('로그인 실패:', error)
-      toast({
-        title: "로그인 실패",
-        description: error.message || "이메일 또는 비밀번호를 확인해주세요.",
-        variant: "destructive",
-      })
+      // 오류 메시지는 이미 setErrorMessage에서 설정됨
     } finally {
       setIsLoading(false)
     }
@@ -79,6 +80,15 @@ export default function LoginPage() {
           </CardHeader>
           <form onSubmit={handleLogin}>
             <CardContent className="space-y-4">
+              {/* 오류 메시지 표시 */}
+              {errorMessage && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertCircle className="h-4 w-4 mr-2" />
+                  <AlertDescription>
+                    {errorMessage}
+                  </AlertDescription>
+                </Alert>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="email">이메일</Label>
                 <Input

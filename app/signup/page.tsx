@@ -9,6 +9,8 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/components/ui/use-toast"
 import { signUp } from "@/lib/supabase"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { AlertCircle } from "lucide-react"
 
 export default function SignupPage() {
   const [email, setEmail] = useState("")
@@ -18,18 +20,16 @@ export default function SignupPage() {
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const router = useRouter()
   const { toast } = useToast()
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
+    setErrorMessage(null)
 
     if (password !== confirmPassword) {
-      toast({
-        title: "비밀번호 불일치",
-        description: "비밀번호와 비밀번호 확인이 일치하지 않습니다.",
-        variant: "destructive",
-      })
+      setErrorMessage("비밀번호와 비밀번호 확인이 일치하지 않습니다.")
       return
     }
 
@@ -51,24 +51,23 @@ export default function SignupPage() {
 
       if (error) {
         console.error('회원가입 실패 상세:', error)
+        
+        // 이미 가입된 이메일인 경우 특정 메시지 표시
+        if (error.message?.includes('User already registered') || error.message?.includes('already exists')) {
+          setErrorMessage("이미 가입된 이메일입니다. 로그인을 시도하거나 다른 이메일을 사용해주세요.")
+        } else {
+          setErrorMessage(error.message || "회원가입 중 문제가 발생했습니다.")
+        }
         throw error
       }
       
       console.log('회원가입 성공:', data)
 
-      toast({
-        title: "회원가입 이메일 발송됨",
-        description: "이메일에 포함된 링크를 클릭하여 계정을 활성화해 주세요.",
-      })
-
-      router.push("/login")
+      // 회원가입 완료 페이지로 이동
+      router.push("/signup/complete")
     } catch (error: any) {
       console.error('회원가입 예외:', error)
-      toast({
-        title: "회원가입 실패",
-        description: error.message || "다시 시도해주세요.",
-        variant: "destructive",
-      })
+      // 오류 메시지는 이미 설정되었음
     } finally {
       setIsLoading(false)
     }
@@ -98,6 +97,15 @@ export default function SignupPage() {
           </CardHeader>
           <form onSubmit={handleSignup}>
             <CardContent className="space-y-4">
+              {/* 오류 메시지 표시 */}
+              {errorMessage && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertCircle className="h-4 w-4 mr-2" />
+                  <AlertDescription>
+                    {errorMessage}
+                  </AlertDescription>
+                </Alert>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="email">이메일</Label>
                 <Input
