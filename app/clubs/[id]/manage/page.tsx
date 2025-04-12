@@ -170,12 +170,53 @@ export default function ClubManagePage({ params }: { params: Params }) {
     })
   }
 
-  // 새 초대 링크 생성 (실제로는 더 안전한 방법으로 구현 필요)
+  // 새 초대 링크 생성 (실제 데이터베이스와 연동)
   const handleRegenerateInviteLink = async () => {
     setIsGeneratingLink(true)
 
     try {
-      const newLink = `${window.location.origin}/clubs/join?code=${clubId}&t=${Date.now()}`
+      // 현재 사용자 정보 가져오기
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (!user) {
+        toast({
+          title: "로그인 필요",
+          description: "초대 링크를 생성하려면 로그인이 필요합니다.",
+          variant: "destructive",
+        })
+        return
+      }
+      
+      // 고유한 초대 코드 생성
+      const inviteCode = `${clubId.slice(0, 8)}-${Date.now().toString(36)}`
+      
+      // 기존 초대 코드 비활성화
+      await supabase
+        .from('club_invites')
+        .update({ is_active: false })
+        .eq('club_id', clubId)
+      
+      // 새 초대 코드 생성
+      const { data: inviteData, error: inviteError } = await supabase
+        .from('club_invites')
+        .insert([
+          {
+            club_id: clubId,
+            code: inviteCode,
+            created_by: user.id,
+            expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30일 후 만료
+            is_active: true
+          }
+        ])
+        .select()
+        .single()
+      
+      if (inviteError) {
+        throw inviteError
+      }
+      
+      // 초대 링크 업데이트
+      const newLink = `${window.location.origin}/clubs/join?code=${inviteCode}`
       setInviteLink(newLink)
 
       toast({
@@ -183,9 +224,10 @@ export default function ClubManagePage({ params }: { params: Params }) {
         description: "새로운 초대 링크가 생성되었습니다.",
       })
     } catch (error: any) {
+      console.error("초대 링크 생성 오류:", error)
       toast({
         title: "초대 링크 생성 실패",
-        description: "다시 시도해주세요.",
+        description: error.message || "다시 시도해주세요.",
         variant: "destructive",
       })
     } finally {

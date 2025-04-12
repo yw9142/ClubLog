@@ -58,24 +58,23 @@ export default function ClubDetailPage({ params }: { params: Params }) {
           .select('role')
           .eq('club_id', clubId)
           .eq('user_id', user.id)
-          .single()
+          .maybeSingle()
 
-        if (membershipError && membershipError.code !== 'PGRST116') { // PGRST116는 결과가 없을 때 오류 코드
-          throw membershipError
+        if (!membershipError && membership) {
+          setRole(membership.role === 'admin' ? "관리자" : "회원")
         }
 
-        setRole(membership?.role === 'admin' ? '관리자' : '회원')
-
-        // 멤버 수 가져오기
+        // 멤버 수 확인
         const { count, error: countError } = await supabase
           .from('club_members')
           .select('*', { count: 'exact', head: true })
           .eq('club_id', clubId)
 
-        if (countError) throw countError
-        setMemberCount(count || 0)
+        if (!countError) {
+          setMemberCount(count || 0)
+        }
 
-        // 동아리 멤버 목록 가져오기
+        // 멤버 목록 가져오기
         const { data: memberData, error: memberError } = await supabase
           .from('club_members')
           .select(`
@@ -97,8 +96,23 @@ export default function ClubDetailPage({ params }: { params: Params }) {
         if (sessionError) throw sessionError
         setSessions(sessionData)
 
-        // 초대 링크 생성 (실제로는 초대 링크 생성 로직이 필요함)
-        setInviteLink(`${window.location.origin}/clubs/join?id=${clubId}`)
+        // 활성화된 최신 초대 코드 가져오기
+        const { data: inviteData, error: inviteError } = await supabase
+          .from('club_invites')
+          .select('code')
+          .eq('club_id', clubId)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single()
+        
+        // 초대 코드가 있다면 해당 코드로 초대 링크 설정
+        if (!inviteError && inviteData) {
+          setInviteLink(`${window.location.origin}/clubs/join?code=${inviteData.code}`)
+        } else {
+          // 초대 코드가 없다면 기본 링크 설정 (첫 접속 시 자동 생성됨)
+          setInviteLink(`${window.location.origin}/clubs/join?code=${clubId}`)
+        }
 
       } catch (error: any) {
         toast({

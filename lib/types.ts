@@ -53,3 +53,14 @@ export type Attendance = {
   updated_at: string;
   profile?: Profile;
 };
+
+export type ClubInvite = {
+  id: string;
+  club_id: string;
+  code: string;
+  created_by: string;
+  expires_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};

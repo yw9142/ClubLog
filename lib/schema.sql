@@ -185,3 +185,51 @@ create policy "동아리 관리자는 출석을 수정할 수 있음" on public.
       where s.id = attendances.session_id and c.created_by = auth.uid()
     )
   );
+
+-- club_invites 테이블 정의
+create table if not exists public.club_invites (
+  id uuid default gen_random_uuid() primary key,
+  club_id uuid references public.clubs(id) on delete cascade not null,
+  code text not null unique,
+  created_by uuid references public.profiles(id) not null,
+  expires_at timestamp with time zone,
+  is_active boolean default true not null,
+  created_at timestamp with time zone default now() not null,
+  updated_at timestamp with time zone default now() not null
+);
+
+-- RLS 정책 설정
+alter table public.club_invites enable row level security;
+create policy "동아리 관리자는 초대 코드를 볼 수 있음" on public.club_invites
+  for select using (
+    exists (
+      select 1 from public.club_members
+      where club_id = club_invites.club_id and user_id = auth.uid() and role = 'admin'
+    ) or
+    exists (
+      select 1 from public.clubs
+      where id = club_invites.club_id and created_by = auth.uid()
+    )
+  );
+create policy "동아리 관리자는 초대 코드를 생성할 수 있음" on public.club_invites
+  for insert with check (
+    exists (
+      select 1 from public.club_members
+      where club_id = new.club_id and user_id = auth.uid() and role = 'admin'
+    ) or
+    exists (
+      select 1 from public.clubs
+      where id = new.club_id and created_by = auth.uid()
+    )
+  );
+create policy "동아리 관리자는 초대 코드를 수정할 수 있음" on public.club_invites
+  for update using (
+    exists (
+      select 1 from public.club_members
+      where club_id = club_invites.club_id and user_id = auth.uid() and role = 'admin'
+    ) or
+    exists (
+      select 1 from public.clubs
+      where id = club_invites.club_id and created_by = auth.uid()
+    )
+  );
