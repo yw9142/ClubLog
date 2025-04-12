@@ -5,8 +5,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import Link from "next/link"
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useToast } from "@/components/ui/use-toast"
 import { signIn } from "@/lib/supabase"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -21,6 +21,8 @@ export default function LoginPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { refreshProfile } = useUserProfile()
+  const searchParams = useSearchParams()
+  const redirectPath = searchParams.get('redirect') || '/dashboard'
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -48,11 +50,11 @@ export default function LoginPage() {
 
       toast({
         title: "로그인 성공",
-        description: "대시보드로 이동합니다.",
+        description: "페이지로 이동합니다.",
       })
       
-      router.push("/dashboard")
-      router.refresh()
+      // 강제로 페이지 이동
+      window.location.href = redirectPath
     } catch (error: any) {
       console.error('로그인 실패:', error)
       // 오류 메시지는 이미 setErrorMessage에서 설정됨
@@ -60,6 +62,11 @@ export default function LoginPage() {
       setIsLoading(false)
     }
   }
+
+  // 개발 디버깅용 로그
+  useEffect(() => {
+    console.log('현재 리다이렉션 경로:', redirectPath)
+  }, [redirectPath])
 
   return (
     <div>

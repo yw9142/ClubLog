@@ -16,6 +16,9 @@ export function Header() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isOpen, setIsOpen] = useState(false)
+  
+  // 루트 페이지인지 확인
+  const isRootPage = pathname === "/"
 
   // 네비게이션 아이템 정의
   const navItems = [
@@ -97,9 +100,11 @@ export function Header() {
             >
               동아리 출석 체크
             </h1>
-            <div className="hidden md:block">
-              <MainNav />
-            </div>
+            {!isRootPage && (
+              <div className="hidden md:block">
+                <MainNav />
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {isAuthenticated ? (
@@ -150,6 +155,26 @@ export function Header() {
                       })
                     ) : (
                       <>
+                        {!isRootPage ? (
+                          // 루트 페이지가 아닌 경우 메뉴 표시
+                          navItems.map((item) => {
+                            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                            return (
+                              <Button
+                                key={item.href}
+                                variant="ghost"
+                                className="justify-start w-full hover:bg-blue-50"
+                                onClick={() => {
+                                  setIsOpen(false)
+                                  router.push("/login")
+                                }}
+                              >
+                                <item.icon className="mr-2 h-4 w-4" />
+                                {item.name}
+                              </Button>
+                            )
+                          })
+                        ) : null}
                         <Button
                           variant="ghost"
                           className="justify-start w-full hover:bg-blue-50"

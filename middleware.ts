@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import path from 'path'
 
 // 로그인이 필요한 경로 목록
 const protectedRoutes = [
   '/dashboard',
   '/profile',
   '/settings',
+  '/clubs',
   '/clubs/create',
+  '/clubs/[id]',
   '/clubs/[id]/manage',
+  '/attendance',
   '/attendance/create',
+  '/attendance/[id]',
   '/attendance/[id]/qr',
   '/attendance/scan',
   '/statistics'
@@ -27,6 +32,11 @@ const publicRoutes = [
 export async function middleware(request: NextRequest) {
   // 현재 URL 경로
   const { pathname } = request.nextUrl
+
+  // 로그인 페이지에서는 미들웨어 검사를 건너뛰어 리다이렉션 루프를 방지
+  if (pathname === '/login') {
+    return NextResponse.next()
+  }
 
   // Supabase 클라이언트 생성
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -58,11 +68,13 @@ export async function middleware(request: NextRequest) {
     })
   }
 
-  // 보호된 경로에 비로그인 사용자가 접근하는 경우
-//   if (isProtectedRoute() && !isAuthenticated) {
-//     const redirectUrl = new URL('/', request.url)
-//     return NextResponse.redirect(redirectUrl)
-//   }
+  // // 보호된 경로에 비로그인 사용자가 접근하는 경우
+  if (isProtectedRoute() && !isAuthenticated && (pathname === '/login')) {
+    // 현재 요청 URL을 state로 포함시켜 로그인 후 원래 페이지로 돌아갈 수 있도록 함
+    const redirectUrl = new URL('/login', request.url)
+    redirectUrl.searchParams.set('redirect', pathname)
+    return NextResponse.redirect(redirectUrl)
+  }
 
   // 이미 로그인한 사용자가 로그인/가입 페이지에 접근하는 경우
   if (isAuthenticated && (pathname === '/login' || pathname === '/signup')) {
