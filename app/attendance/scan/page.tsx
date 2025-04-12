@@ -58,23 +58,50 @@ export default function ScanQRPage() {
     };
     
     checkCameraPermission();
-  }, []);
+  }, [scanned]);
 
   // QR 스캐너 초기화
   const initQrScanner = async () => {
-    if (scanned || scannerRef.current || !videoRef.current) return;
+    if (scanned || scannerRef.current) return;
 
     try {
       // 동적으로 html5-qrcode 라이브러리 로드
       const { Html5Qrcode } = await import('html5-qrcode');
       
-      // 스캐너 초기화
-      const scanner = new Html5Qrcode('html5-qrcode-element');
+      // 스캐너 초기화 - ID를 직접 확인
+      const elementId = 'html5-qrcode-element';
+      const element = document.getElementById(elementId);
+      if (!element) {
+        console.error('스캐너 요소를 찾을 수 없습니다:', elementId);
+        return;
+      }
+      
+      // 기존 내용 초기화
+      element.innerHTML = '';
+      
+      // 스캐너 생성
+      const scanner = new Html5Qrcode(elementId);
       scannerRef.current = scanner;
       
       try {
+        console.log("카메라 스캔 시작 시도");
+        
+        // 화면 크기에 따른 동적 QR 박스 크기 계산 (최소 180px, 최대 400px, 컨테이너 너비의 80%)
+        const containerWidth = element.clientWidth;
+        const containerHeight = element.clientHeight;
+        const minSize = 180;
+        const maxSize = 400;
+        
+        // 컨테이너의 가로 세로 중 작은 쪽에 맞춰 정사각형 계산
+        const smallerDimension = Math.min(containerWidth, containerHeight);
+        const qrboxSize = Math.max(minSize, Math.min(maxSize, Math.floor(smallerDimension * 0.8)));
+        
+        console.log("컨테이너 크기:", containerWidth, "x", containerHeight, "QR박스 크기:", qrboxSize);
+        
         // 카메라 장치 목록 가져오기
         const devices = await Html5Qrcode.getCameras();
+        console.log("감지된 카메라:", devices);
+        
         if (devices && devices.length) {
           // 카메라 시작 - 자동으로 후면 카메라 사용 시도
           let cameraId = devices[0].id; // 기본적으로 첫 번째 카메라
@@ -89,14 +116,15 @@ export default function ScanQRPage() {
           
           if (backCamera) {
             cameraId = backCamera.id;
+            console.log("후면 카메라 발견:", backCamera.label);
           }
           
           await scanner.start(
             cameraId,
             {
               fps: 10,
-              qrbox: { width: 250, height: 250 },
-              aspectRatio: 1.0
+              qrbox: qrboxSize, // 동적으로 계산된 크기의 정사각형
+              aspectRatio: 1.0,
             },
             onScanSuccess,
             onScanFailure
@@ -109,7 +137,7 @@ export default function ScanQRPage() {
             { facingMode: "environment" },
             {
               fps: 10,
-              qrbox: { width: 250, height: 250 },
+              qrbox: { width: 400, height: 400 },
               aspectRatio: 1.0
             },
             onScanSuccess,
@@ -124,7 +152,7 @@ export default function ScanQRPage() {
           { facingMode: "environment" },
           {
             fps: 10,
-            qrbox: { width: 250, height: 250 },
+            qrbox: { width: 400, height: 400 },
             aspectRatio: 1.0
           },
           onScanSuccess,
@@ -383,8 +411,13 @@ export default function ScanQRPage() {
               <Button onClick={() => window.location.reload()}>다시 시도</Button>
             </div>
           ) : (
-            <div className="w-full">
-              <div id="html5-qrcode-element" style={{ width: '100%', minHeight: '300px' }}></div>
+            <div className="w-full h-96 border rounded overflow-hidden">
+              <div id="html5-qrcode-element" className="w-full h-full" style={{
+                maxWidth: "100%", 
+                height: "100%", 
+                display: "block",
+                position: "relative"
+              }}></div>
             </div>
           )}
         </CardContent>
