@@ -37,13 +37,19 @@ export default function ScanQRPage() {
           
           // 권한이 변경되어 허용되었을 때 자동으로 스캐너 초기화
           if (newState === 'granted' && !scannerRef.current) {
-            initQrScanner();
+            // 약간의 지연을 주어 DOM이 업데이트된 후 스캐너 초기화
+            setTimeout(() => {
+              initQrScanner();
+            }, 500);
           }
         };
 
         // 권한이 이미 허용된 상태라면 자동으로 스캐너 초기화
         if (permState === 'granted') {
-          initQrScanner();
+          // 약간의 지연을 주어 DOM이 완전히 렌더링된 후 스캐너 초기화
+          setTimeout(() => {
+            initQrScanner();
+          }, 500);
         }
       } catch (error) {
         console.error("카메라 권한 확인 오류:", error);
@@ -51,20 +57,60 @@ export default function ScanQRPage() {
         navigator.mediaDevices.getUserMedia({ video: true })
           .then(() => {
             setCameraPermission('granted');
-            initQrScanner();
+            // 약간의 지연을 주어 DOM이 업데이트된 후 스캐너 초기화
+            setTimeout(() => {
+              initQrScanner();
+            }, 500);
           })
-          .catch(() => setCameraPermission('denied'));
+          .catch((err) => {
+            console.error("카메라 접근 오류:", err);
+            setCameraPermission('denied');
+          });
       }
     };
     
-    checkCameraPermission();
+    // 컴포넌트가 마운트된 후 카메라 권한 확인
+    setTimeout(checkCameraPermission, 300);
+    
+    // 컴포넌트 언마운트 시 스캐너 정리
+    return () => {
+      if (scannerRef.current) {
+        try {
+          scannerRef.current.stop().then(() => {
+            console.log("스캐너가 성공적으로 정리되었습니다.");
+            scannerRef.current = null;
+          }).catch((err: any) => {
+            console.error("스캐너 정리 중 오류:", err);
+          });
+        } catch (error) {
+          console.error("스캐너 정리 중 오류:", error);
+          scannerRef.current = null;
+        }
+      }
+    };
   }, [scanned]);
 
   // QR 스캐너 초기화
   const initQrScanner = async () => {
-    if (scanned || scannerRef.current) return;
-
+    // 이미 스캔 완료되었거나 스캐너가 이미 초기화된 경우 무시
+    if (scanned || scannerRef.current) {
+      console.log("이미 스캔되었거나 스캐너가 이미 초기화되어 있습니다.");
+      return;
+    }
+    
     try {
+      // 이전 스캐너가 있으면 정리
+      if (scannerRef.current) {
+        try {
+          await scannerRef.current.stop();
+          scannerRef.current = null;
+          console.log("이전 스캐너 정리 완료");
+        } catch (cleanupError) {
+          console.error("이전 스캐너 정리 중 오류:", cleanupError);
+          scannerRef.current = null;
+        }
+      }
+      
       // 동적으로 html5-qrcode 라이브러리 로드
       const { Html5Qrcode } = await import('html5-qrcode');
       
@@ -73,6 +119,7 @@ export default function ScanQRPage() {
       const element = document.getElementById(elementId);
       if (!element) {
         console.error('스캐너 요소를 찾을 수 없습니다:', elementId);
+        setCameraError(true);
         return;
       }
       
@@ -119,50 +166,134 @@ export default function ScanQRPage() {
             console.log("후면 카메라 발견:", backCamera.label);
           }
           
-          await scanner.start(
-            cameraId,
-            {
-              fps: 10,
-              qrbox: qrboxSize, // 동적으로 계산된 크기의 정사각형
-              aspectRatio: 1.0,
-            },
-            onScanSuccess,
-            onScanFailure
-          );
-          
-          setScanning(true);
+          try {
+            await scanner.start(
+              cameraId,
+              {
+                fps: 10,
+                qrbox: qrboxSize, // 동적으로 계산된 크기의 정사각형
+                aspectRatio: 1.0,
+              },
+              onScanSuccess,
+              onScanFailure
+            );
+            
+            setScanning(true);
+            console.log("카메라 시작 성공 - ID:", cameraId);
+          } catch (specificCameraError) {
+            console.error("특정 카메라 시작 오류:", specificCameraError);
+            
+            // 특정 카메라 실패 시 환경 카메라로 시도
+            try {
+              await scanner.start(
+                { facingMode: "environment" },
+                {
+                  fps: 10,
+                  qrbox: { width: qrboxSize, height: qrboxSize },
+                  aspectRatio: 1.0
+                },
+                onScanSuccess,
+                onScanFailure
+              );
+              
+              setScanning(true);
+              console.log("환경 카메라로 시작 성공");
+            } catch (envCameraError) {
+              console.error("환경 카메라 시작 오류:", envCameraError);
+              
+              // 마지막 시도로 사용자 카메라 시도
+              try {
+                await scanner.start(
+                  { facingMode: "user" },
+                  {
+                    fps: 10,
+                    qrbox: { width: qrboxSize, height: qrboxSize },
+                    aspectRatio: 1.0
+                  },
+                  onScanSuccess,
+                  onScanFailure
+                );
+                
+                setScanning(true);
+                console.log("사용자 카메라로 시작 성공");
+              } catch (userCameraError) {
+                console.error("모든 카메라 시작 실패:", userCameraError);
+                setCameraError(true);
+                
+                // 스캐너 정리
+                if (scannerRef.current) {
+                  try {
+                    await scannerRef.current.stop();
+                  } catch (e) {}
+                  scannerRef.current = null;
+                }
+              }
+            }
+          }
         } else {
           // 장치를 찾을 수 없을 경우, 기본 설정으로 시작
-          await scanner.start(
-            { facingMode: "environment" },
-            {
-              fps: 10,
-              qrbox: { width: 400, height: 400 },
-              aspectRatio: 1.0
-            },
-            onScanSuccess,
-            onScanFailure
-          );
-          setScanning(true);
+          try {
+            await scanner.start(
+              { facingMode: "environment" },
+              {
+                fps: 10,
+                qrbox: { width: qrboxSize, height: qrboxSize },
+                aspectRatio: 1.0
+              },
+              onScanSuccess,
+              onScanFailure
+            );
+            
+            setScanning(true);
+            console.log("기본 환경 카메라로 시작 성공");
+          } catch (defaultError) {
+            console.error("기본 환경 카메라 시작 오류:", defaultError);
+            
+            // 마지막 시도로 사용자 카메라 시도
+            try {
+              await scanner.start(
+                { facingMode: "user" },
+                {
+                  fps: 10,
+                  qrbox: { width: qrboxSize, height: qrboxSize },
+                  aspectRatio: 1.0
+                },
+                onScanSuccess,
+                onScanFailure
+              );
+              
+              setScanning(true);
+              console.log("사용자 카메라로 시작 성공");
+            } catch (userCameraError) {
+              console.error("모든 카메라 시작 실패:", userCameraError);
+              setCameraError(true);
+              
+              // 스캐너 정리
+              if (scannerRef.current) {
+                try {
+                  await scannerRef.current.stop();
+                } catch (e) {}
+                scannerRef.current = null;
+              }
+            }
+          }
         }
       } catch (startError) {
         console.error("카메라 시작 오류:", startError);
-        // 특정 카메라 ID로 시작하지 못한 경우, facingMode를 사용해 시도
-        await scanner.start(
-          { facingMode: "environment" },
-          {
-            fps: 10,
-            qrbox: { width: 400, height: 400 },
-            aspectRatio: 1.0
-          },
-          onScanSuccess,
-          onScanFailure
-        );
-        setScanning(true);
+        setCameraError(true);
+        
+        // 스캐너 정리
+        if (scannerRef.current) {
+          try {
+            await scannerRef.current.stop();
+          } catch (e) {}
+          scannerRef.current = null;
+        }
       }
     } catch (error) {
       console.error("QR 스캐너 초기화 오류:", error);
       setCameraError(true);
+      scannerRef.current = null;
     }
   };
 
