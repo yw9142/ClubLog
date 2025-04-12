@@ -11,6 +11,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { signIn } from "@/lib/supabase"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle } from "lucide-react"
+import { useUserProfile } from "@/hooks/use-user-profile"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
@@ -19,6 +20,7 @@ export default function LoginPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const router = useRouter()
   const { toast } = useToast()
+  const { refreshProfile } = useUserProfile()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -40,6 +42,9 @@ export default function LoginPage() {
       }
 
       console.log('로그인 성공:', data)
+      
+      // 로그인 성공 시 사용자 프로필 정보 갱신
+      await refreshProfile()
 
       toast({
         title: "로그인 성공",
