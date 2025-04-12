@@ -12,6 +12,18 @@ body {
   }
 }
 
+/* 모바일 스크롤바 숨기기 */
+@media (max-width: 767px) {
+  * {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+  
+  *::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari, Opera */
+  }
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
