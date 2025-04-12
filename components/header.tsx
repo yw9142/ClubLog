@@ -57,10 +57,21 @@ export function Header() {
     }
     
     checkAuth()
+
+    // 로그인 상태 변화 감지
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      setIsAuthenticated(!!session?.user)
+    })
+
+    return () => {
+      authListener?.subscription.unsubscribe()
+    }
   }, [])
 
   // 로그인/회원가입 페이지에서는 다른 헤더를 사용하므로 제외
-  const isAuthPage = pathname === "/login" || pathname === "/signup" || pathname === "/"
+  // 루트 페이지는 isAuthPage에서 제외 (루트 페이지에서도 헤더 표시)
+  const isAuthPage = pathname === "/login" || pathname === "/signup" || 
+                    pathname === "/forgot-password" || pathname === "/reset-password"
 
   if (isAuthPage) {
     return null
