@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import Link from "next/link"
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useToast } from "@/components/ui/use-toast"
 import { signIn } from "@/lib/supabase"
@@ -13,7 +13,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle } from "lucide-react"
 import { useUserProfile } from "@/hooks/use-user-profile"
 
-export default function LoginPage() {
+// 검색 파라미터를 처리하는 컴포넌트
+function LoginForm() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -69,6 +70,65 @@ export default function LoginPage() {
   }, [redirectPath])
 
   return (
+    <>
+      <form onSubmit={handleLogin}>
+        <CardContent className="space-y-4">
+          {/* 오류 메시지 표시 */}
+          {errorMessage && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertCircle className="h-4 w-4 mr-2" />
+              <AlertDescription>
+                {errorMessage}
+              </AlertDescription>
+            </Alert>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="email">이메일</Label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="your.email@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">비밀번호</Label>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            <div className="text-right text-sm">
+              <Link href="/forgot-password" className="text-blue-600 hover:underline">
+                비밀번호를 잊으셨나요?
+              </Link>
+            </div>
+          </div>
+        </CardContent>
+        <CardFooter className="flex flex-col space-y-4">
+          <Button type="submit" className="w-full" disabled={isLoading}>
+            {isLoading ? "로그인 중..." : "로그인"}
+          </Button>
+          <div className="text-center text-sm">
+            계정이 없으신가요?{" "}
+            <Link href="/signup" className="text-blue-600 hover:underline">
+              회원가입
+            </Link>
+          </div>
+        </CardFooter>
+      </form>
+    </>
+  )
+}
+
+export default function LoginPage() {
+  const router = useRouter()
+  
+  return (
     <div>
       <header className="container mx-auto py-6 px-4">
         <div className="flex justify-between items-center">
@@ -90,56 +150,9 @@ export default function LoginPage() {
             <CardTitle className="text-2xl font-bold text-center">로그인</CardTitle>
             <CardDescription className="text-center">아래 정보를 입력하여 로그인하세요</CardDescription>
           </CardHeader>
-          <form onSubmit={handleLogin}>
-            <CardContent className="space-y-4">
-              {/* 오류 메시지 표시 */}
-              {errorMessage && (
-                <Alert variant="destructive" className="mb-4">
-                  <AlertCircle className="h-4 w-4 mr-2" />
-                  <AlertDescription>
-                    {errorMessage}
-                  </AlertDescription>
-                </Alert>
-              )}
-              <div className="space-y-2">
-                <Label htmlFor="email">이메일</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="your.email@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">비밀번호</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-                <div className="text-right text-sm">
-                  <Link href="/forgot-password" className="text-blue-600 hover:underline">
-                    비밀번호를 잊으셨나요?
-                  </Link>
-                </div>
-              </div>
-            </CardContent>
-            <CardFooter className="flex flex-col space-y-4">
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "로그인 중..." : "로그인"}
-              </Button>
-              <div className="text-center text-sm">
-                계정이 없으신가요?{" "}
-                <Link href="/signup" className="text-blue-600 hover:underline">
-                  회원가입
-                </Link>
-              </div>
-            </CardFooter>
-          </form>
+          <Suspense fallback={<CardContent className="space-y-4"><div>로딩 중...</div></CardContent>}>
+            <LoginForm />
+          </Suspense>
         </Card>
       </div>
     </div>
