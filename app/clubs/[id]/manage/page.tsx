@@ -187,8 +187,11 @@ export default function ClubManagePage({ params }: { params: Params }) {
         return
       }
       
-      // 고유한 초대 코드 생성
-      const inviteCode = `${clubId.slice(0, 8)}-${Date.now().toString(36)}`
+      // 고유한 초대 코드 생성 (더 명확하고 고유한 형식)
+      const randomPart = Math.random().toString(36).substring(2, 8);
+      const inviteCode = `${clubId.slice(0, 8)}-${randomPart}`;
+      
+      console.log("생성할 초대 코드:", inviteCode);
       
       // 기존 초대 코드 비활성화
       await supabase
@@ -212,19 +215,22 @@ export default function ClubManagePage({ params }: { params: Params }) {
         .single()
       
       if (inviteError) {
-        throw inviteError
+        console.error("초대 코드 생성 오류:", inviteError);
+        throw inviteError;
       }
       
+      console.log("생성된 초대 정보:", inviteData);
+      
       // 초대 링크 업데이트
-      const newLink = `${window.location.origin}/clubs/join?code=${inviteCode}`
-      setInviteLink(newLink)
+      const newLink = `${window.location.origin}/clubs/join?code=${inviteCode}`;
+      setInviteLink(newLink);
 
       toast({
         title: "초대 링크 재생성 완료",
         description: "새로운 초대 링크가 생성되었습니다.",
       })
     } catch (error: any) {
-      console.error("초대 링크 생성 오류:", error)
+      console.error("초대 링크 생성 오류:", error);
       toast({
         title: "초대 링크 생성 실패",
         description: error.message || "다시 시도해주세요.",

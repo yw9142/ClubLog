@@ -52,7 +52,10 @@ export function useUserProfile() {
       const profileData = await getUserProfile()
       
       if (!profileData) {
-        throw new Error('사용자 프로필을 불러올 수 없습니다.')
+        // 프로필 데이터가 없으면 오류를 던지지 말고 null 설정
+        console.log('사용자 프로필을 찾을 수 없습니다. 로그인되지 않았거나 프로필이 없는 상태입니다.');
+        setProfile(null);
+        return;
       }
       
       setProfile(profileData as Profile)
