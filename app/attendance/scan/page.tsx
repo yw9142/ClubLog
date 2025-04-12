@@ -72,22 +72,8 @@ export default function ScanQRPage() {
     // 컴포넌트가 마운트된 후 카메라 권한 확인
     setTimeout(checkCameraPermission, 300);
     
-    // 컴포넌트 언마운트 시 스캐너 정리
-    return () => {
-      if (scannerRef.current) {
-        try {
-          scannerRef.current.stop().then(() => {
-            console.log("스캐너가 성공적으로 정리되었습니다.");
-            scannerRef.current = null;
-          }).catch((err: any) => {
-            console.error("스캐너 정리 중 오류:", err);
-          });
-        } catch (error) {
-          console.error("스캐너 정리 중 오류:", error);
-          scannerRef.current = null;
-        }
-      }
-    };
+    // 컴포넌트 언마운트 시 스캐너 정리 - 여기서는 정리 로직을 제거
+    // 스캐너 정리는 별도의 useEffect에서 처리
   }, [scanned]);
 
   // QR 스캐너 초기화
@@ -300,11 +286,18 @@ export default function ScanQRPage() {
     console.log(`QR 코드 스캔 성공: ${decodedText}`, decodedResult);
     
     try {
-      // 스캐너 중지
+      // 스캐너 중지 - 비동기 오류 처리 개선
       if (scannerRef.current) {
-        await scannerRef.current.stop();
-        scannerRef.current = null;
+        try {
+          setScanning(false);
+          await scannerRef.current.stop();
+        } catch (stopError) {
+          console.log("스캔 성공 후 스캐너 중지 중 무시된 오류:", stopError);
+        } finally {
+          scannerRef.current = null;
+        }
       }
+      
       setScanned(true);
       setProcessingAttendance(true);
       
@@ -325,7 +318,28 @@ export default function ScanQRPage() {
       }
       
       // 현재 사용자 정보 가져오기
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      
+      if (userError) {
+        console.error("사용자 정보 가져오기 오류:", userError);
+        // 세션 갱신 시도
+        const { error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError) {
+          // 세션 갱신 실패 시 로그인 페이지로 리다이렉트하지만 현재 페이지는 유지
+          toast({
+            title: "로그인 세션 만료",
+            description: "다시 로그인이 필요합니다.",
+            variant: "destructive",
+          });
+          throw new Error("로그인 세션이 만료되었습니다.");
+        }
+        
+        // 세션 갱신 후 사용자 정보 다시 가져오기
+        const { data: { user: refreshedUser } } = await supabase.auth.getUser();
+        if (!refreshedUser) {
+          throw new Error("로그인이 필요합니다.");
+        }
+      }
       
       if (!user) {
         toast({
@@ -333,8 +347,7 @@ export default function ScanQRPage() {
           description: "출석 체크를 하려면 로그인이 필요합니다.",
           variant: "destructive",
         });
-        router.push("/login");
-        return;
+        throw new Error("로그인이 필요합니다.");
       }
 
       // 세션 정보 확인
@@ -414,21 +427,28 @@ export default function ScanQRPage() {
       console.error('출석 처리 오류:', error);
       setScanned(false);
       
-      toast({
-        title: "출석 체크 실패",
-        description: error.message || "QR 코드 처리 중 오류가 발생했습니다.",
-        variant: "destructive",
-      });
-      
-      // 스캐너 다시 시작
-      setTimeout(() => {
-        initQrScanner();
-      }, 2000);
+      // 인증 관련 오류인 경우 로그인 페이지로 이동하지만 로그아웃은 하지 않음
+      if (error.message === "로그인이 필요합니다." || error.message === "로그인 세션이 만료되었습니다.") {
+        router.push("/login");
+      } else {
+        toast({
+          title: "출석 체크 실패",
+          description: error.message || "QR 코드 처리 중 오류가 발생했습니다.",
+          variant: "destructive",
+        });
+        
+        // 스캐너 다시 시작 (오류가 인증 관련이 아닌 경우만)
+        if (!error.message.includes("로그인")) {
+          setTimeout(() => {
+            initQrScanner();
+          }, 2000);
+        }
+      }
     } finally {
       setProcessingAttendance(false);
     }
   };
-
+  
   // QR 코드 스캔 실패 핸들러
   const onScanFailure = (error: any) => {
     // 실패는 무시 (계속 스캐닝)
@@ -440,12 +460,52 @@ export default function ScanQRPage() {
     return () => {
       if (scannerRef.current) {
         try {
-          scannerRef.current.stop();
-        } catch (error) {
-          console.error("스캐너 정리 중 오류:", error);
+          // Promise 객체 처리가 아닌 동기적 처리로 변경
+          if (typeof scannerRef.current.stop === 'function') {
+            // 스캐너 중지 중 오류를 방지하기 위해 상태 체크
+            if (scanning) {
+              try {
+                // stop 메소드를 실행하되 결과를 기다리지 않음
+                scannerRef.current.stop().catch(e => {
+                  console.log("스캐너 정리 중 무시된 오류:", e.message);
+                });
+              } catch (e) {
+                console.log("스캐너 stop 호출 중 무시된 오류");
+              }
+            }
+          }
+        } finally {
+          // 항상 스캐너 참조 초기화
+          scannerRef.current = null;
+          setScanning(false);
         }
-        scannerRef.current = null;
       }
+    };
+  }, [scanning]);
+
+  // 라우터 변경 감지하여 페이지 이탈 시 리소스 정리
+  useEffect(() => {
+    // 페이지 언마운트 시 실행될 정리 함수
+    const handleBeforeUnload = () => {
+      if (scannerRef.current) {
+        try {
+          if (typeof scannerRef.current.stop === 'function') {
+            // 비동기 처리 없이 동기적으로 정리
+            scannerRef.current.stop().catch(() => {});
+          }
+        } catch (e) {
+          // 오류 무시
+        } finally {
+          scannerRef.current = null;
+        }
+      }
+    };
+
+    // 페이지 이동 시 리소스 정리
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
 
