@@ -3,7 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import Link from "next/link"
 import { CheckCircle, QrCode, Users } from "lucide-react"
 
-
 export default function Home() {
 
   return (
@@ -11,14 +10,6 @@ export default function Home() {
       <header className="container mx-auto py-6 px-4">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-blue-700">동아리 출석 체크</h1>
-          <div className="space-x-2">
-            <Button variant="outline" asChild>
-              <Link href="/login">로그인</Link>
-            </Button>
-            <Button asChild>
-              <Link href="/signup">회원가입</Link>
-            </Button>
-          </div>
         </div>
       </header>
 

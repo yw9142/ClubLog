@@ -37,26 +37,7 @@ export default function ClubJoinPage() {
       setLoading(true)
       console.log("초대 코드 검증 시작:", code)
       
-      // 먼저 ID로 직접 동아리 확인 (이전 링크 호환성)
-      if (code && code.length < 36) {
-        console.log("기존 형식의 코드로 동아리 확인 중:", code)
-        // ID로 직접 동아리 확인 시도
-        const { data: clubData, error: clubError } = await supabase
-          .from('clubs')
-          .select('id, name, description')
-          .eq('id', code)
-          .single()
-        
-        console.log("ID로 동아리 검색 결과:", { clubData, clubError })
-        
-        if (!clubError && clubData) {
-          // 기존 코드 방식 - 동아리 ID를 직접 사용
-          setClubInfo(clubData)
-          setLoading(false)
-          return
-        }
-      }
-      
+      // 1. 먼저 초대코드가 club_invites 테이블에 있는지 확인
       try {
         // 초대 코드로 동아리 정보 조회
         const { data: inviteData, error: inviteError } = await supabase
@@ -73,66 +54,103 @@ export default function ClubJoinPage() {
           throw new Error("초대 정보를 조회하는 중 오류가 발생했습니다.")
         }
         
-        if (!inviteData) {
-          console.log("유효한 초대 코드를 찾을 수 없습니다.")
-          setError("유효하지 않은 초대 코드입니다.")
+        // 초대코드가 club_invites 테이블에 존재하면 처리
+        if (inviteData) {
+          // 초대 코드 만료 확인
+          if (inviteData.expires_at && new Date(inviteData.expires_at) < new Date()) {
+            setError("만료된 초대 코드입니다.")
+            setLoading(false)
+            return
+          }
+          
+          setInviteInfo(inviteData as ClubInvite)
+          
+          // 동아리 정보 조회
+          const { data: clubData, error: clubError } = await supabase
+            .from('clubs')
+            .select('id, name, description')
+            .eq('id', inviteData.club_id)
+            .single()
+          
+          console.log("동아리 정보 조회 결과:", { clubData, clubError })
+          
+          if (clubError) {
+            console.error("동아리 정보 오류:", clubError)
+            setError("동아리 정보를 찾을 수 없습니다.")
+            setLoading(false)
+            return
+          }
+          
+          setClubInfo(clubData)
+          
+          // 사용자 인증 상태 확인 - 로그인된 사용자만 멤버십 확인
+          const { data: { user } } = await supabase.auth.getUser()
+          
+          if (user) {
+            // 이미 멤버인지 확인
+            const { data: memberData } = await supabase
+              .from('club_members')
+              .select('*')
+              .eq('club_id', clubData.id)
+              .eq('user_id', user.id)
+              .maybeSingle()
+            
+            if (memberData) {
+              setError("이미 이 동아리의 멤버입니다.")
+              setLoading(false)
+              return
+            }
+          }
+          
           setLoading(false)
           return
         }
-        
-        // 초대 코드 만료 확인
-        if (inviteData.expires_at && new Date(inviteData.expires_at) < new Date()) {
-          setError("만료된 초대 코드입니다.")
-          setLoading(false)
-          return
-        }
-        
-        setInviteInfo(inviteData as ClubInvite)
-        
-        // 동아리 정보 조회
-        const { data: clubData, error: clubError } = await supabase
-          .from('clubs')
-          .select('id, name, description')
-          .eq('id', inviteData.club_id)
-          .single()
-        
-        console.log("동아리 정보 조회 결과:", { clubData, clubError })
-        
-        if (clubError) {
-          console.error("동아리 정보 오류:", clubError)
-          setError("동아리 정보를 찾을 수 없습니다.")
-          setLoading(false)
-          return
-        }
-        
-        setClubInfo(clubData)
-        
       } catch (queryError) {
         console.error("초대 코드 쿼리 오류:", queryError)
-        setError("초대 정보를 조회하는 중 오류가 발생했습니다.")
+        // 여기서는 오류를 던지지 않고 다음 방법으로 시도
+      }
+      
+      // 2. club_invites에서 찾지 못한 경우, 코드가 동아리 ID인지 확인
+      console.log("동아리 ID로 시도:", code)
+      // ID로 직접 동아리 확인 시도
+      const { data: clubData, error: clubError } = await supabase
+        .from('clubs')
+        .select('id, name, description')
+        .eq('id', code)
+        .single()
+      
+      console.log("ID로 동아리 검색 결과:", { clubData, clubError })
+      
+      if (!clubError && clubData) {
+        // 동아리 ID 방식 - 동아리 ID를 직접 사용
+        setClubInfo(clubData)
+        
+        // 사용자 인증 상태 확인 - 로그인된 사용자만 멤버십 확인
+        const { data: { user } } = await supabase.auth.getUser()
+        
+        if (user) {
+          // 이미 멤버인지 확인
+          const { data: memberData } = await supabase
+            .from('club_members')
+            .select('*')
+            .eq('club_id', clubData.id)
+            .eq('user_id', user.id)
+            .maybeSingle()
+          
+          if (memberData) {
+            setError("이미 이 동아리의 멤버입니다.")
+            setLoading(false)
+            return
+          }
+        }
+        
         setLoading(false)
         return
       }
       
-      // 사용자 인증 상태 확인 - 로그인된 사용자만 멤버십 확인
-      const { data: { user } } = await supabase.auth.getUser()
-      
-      if (user && clubInfo) {
-        // 이미 멤버인지 확인
-        const { data: memberData } = await supabase
-          .from('club_members')
-          .select('*')
-          .eq('club_id', clubInfo.id)
-          .eq('user_id', user.id)
-          .maybeSingle()
-        
-        if (memberData) {
-          setError("이미 이 동아리의 멤버입니다.")
-          setLoading(false)
-          return
-        }
-      }
-      
+      // 3. 어떤 방법으로도 유효한 초대코드를 찾지 못한 경우
+      console.log("유효한 초대 코드를 찾을 수 없습니다.")
+      setError("유효하지 않은 초대 코드입니다.")
       setLoading(false)
     } catch (error) {
       console.error("초대 코드 검증 오류:", error)
@@ -143,7 +161,7 @@ export default function ClubJoinPage() {
   
   // 동아리 가입 처리
   const handleJoinClub = async () => {
-    if (!clubInfo || !inviteInfo) return
+    if (!clubInfo) return // inviteInfo 체크를 제거하여 직접 동아리 ID로 가입도 가능하게 함
     
     try {
       setJoining(true)
@@ -160,6 +178,8 @@ export default function ClubJoinPage() {
         return
       }
       
+      console.log("동아리 가입 시도:", { clubId: clubInfo.id, userId: user.id })
+      
       // 동아리 멤버로 추가
       const { error: joinError } = await supabase
         .from('club_members')
@@ -172,6 +192,7 @@ export default function ClubJoinPage() {
         ])
       
       if (joinError) {
+        console.error("가입 에러:", joinError)
         throw joinError
       }
       

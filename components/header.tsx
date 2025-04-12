@@ -102,7 +102,18 @@ export function Header() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <UserNav />
+            {isAuthenticated ? (
+              <UserNav />
+            ) : (
+              <div className="hidden sm:flex space-x-2">
+                <Button variant="outline" asChild size="sm">
+                  <Link href="/login">로그인</Link>
+                </Button>
+                <Button asChild size="sm">
+                  <Link href="/signup">회원가입</Link>
+                </Button>
+              </div>
+            )}
             <div className="md:hidden">
               <Sheet open={isOpen} onOpenChange={setIsOpen}>
                 <SheetTrigger asChild>
@@ -116,26 +127,51 @@ export function Header() {
                     <SheetTitle className="text-left">동아리 출석 체크</SheetTitle>
                   </SheetHeader>
                   <div className="mt-6 flex flex-col space-y-3">
-                    {navItems.map((item) => {
-                      const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
-                      return (
+                    {isAuthenticated ? (
+                      navItems.map((item) => {
+                        const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
+                        return (
+                          <Button
+                            key={item.href}
+                            asChild
+                            variant={isActive ? "default" : "ghost"}
+                            className={cn(
+                              "justify-start w-full",
+                              isActive ? "bg-blue-600 text-white hover:bg-blue-700" : "hover:bg-blue-50",
+                            )}
+                            onClick={() => setIsOpen(false)}
+                          >
+                            <Link href={item.href} className="flex items-center">
+                              <item.icon className="mr-2 h-4 w-4" />
+                              {item.name}
+                            </Link>
+                          </Button>
+                        )
+                      })
+                    ) : (
+                      <>
                         <Button
-                          key={item.href}
-                          asChild
-                          variant={isActive ? "default" : "ghost"}
-                          className={cn(
-                            "justify-start w-full",
-                            isActive ? "bg-blue-600 text-white hover:bg-blue-700" : "hover:bg-blue-50",
-                          )}
-                          onClick={() => setIsOpen(false)}
+                          variant="ghost"
+                          className="justify-start w-full hover:bg-blue-50"
+                          onClick={() => {
+                            setIsOpen(false)
+                            router.push("/login")
+                          }}
                         >
-                          <Link href={item.href} className="flex items-center">
-                            <item.icon className="mr-2 h-4 w-4" />
-                            {item.name}
-                          </Link>
+                          로그인
                         </Button>
-                      )
-                    })}
+                        <Button
+                          variant="ghost"
+                          className="justify-start w-full hover:bg-blue-50"
+                          onClick={() => {
+                            setIsOpen(false)
+                            router.push("/signup")
+                          }}
+                        >
+                          회원가입
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </SheetContent>
               </Sheet>
