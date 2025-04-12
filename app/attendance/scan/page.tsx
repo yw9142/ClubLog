@@ -384,7 +384,7 @@ export default function ScanQRPage() {
             </div>
           ) : (
             <div className="w-full">
-              <div id="html5-qrcode-element" ref={videoRef} className="w-full h-64"></div>
+              <div id="html5-qrcode-element" style={{ width: '100%', minHeight: '300px' }}></div>
             </div>
           )}
         </CardContent>
