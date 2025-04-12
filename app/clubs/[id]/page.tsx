@@ -78,8 +78,17 @@ export default function ClubDetailPage({ params }: { params: Params }) {
         const { data: memberData, error: memberError } = await supabase
           .from('club_members')
           .select(`
-            *,
-            profile:profiles(*)
+            id,
+            user_id,
+            role,
+            joined_at,
+            profile:user_id (
+              id,
+              full_name,
+              email,
+              school,
+              department
+            )
           `)
           .eq('club_id', clubId)
 
@@ -96,21 +105,28 @@ export default function ClubDetailPage({ params }: { params: Params }) {
         if (sessionError) throw sessionError
         setSessions(sessionData)
 
-        // 활성화된 최신 초대 코드 가져오기
-        const { data: inviteData, error: inviteError } = await supabase
-          .from('club_invites')
-          .select('code')
-          .eq('club_id', clubId)
-          .eq('is_active', true)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single()
-        
-        // 초대 코드가 있다면 해당 코드로 초대 링크 설정
-        if (!inviteError && inviteData) {
-          setInviteLink(`${window.location.origin}/clubs/join?code=${inviteData.code}`)
-        } else {
-          // 초대 코드가 없다면 기본 링크 설정 (첫 접속 시 자동 생성됨)
+        try {
+          // 활성화된 최신 초대 코드 가져오기 - 헤더 추가
+          const { data: inviteData, error: inviteError } = await supabase
+            .from('club_invites')
+            .select('code')
+            .eq('club_id', clubId)
+            .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle() // single 대신 maybeSingle 사용
+
+          // 초대 코드가 있다면 해당 코드로 초대 링크 설정
+          if (!inviteError && inviteData) {
+            setInviteLink(`${window.location.origin}/clubs/join?code=${inviteData.code}`)
+          } else {
+            console.log("유효한 초대 코드를 찾지 못했습니다:", inviteError);
+            // 초대 코드가 없다면 기본 링크 설정 (club_id 사용)
+            setInviteLink(`${window.location.origin}/clubs/join?code=${clubId}`)
+          }
+        } catch (inviteError) {
+          console.error("초대 코드 조회 오류:", inviteError);
+          // 오류 발생 시 기본 링크 설정
           setInviteLink(`${window.location.origin}/clubs/join?code=${clubId}`)
         }
 

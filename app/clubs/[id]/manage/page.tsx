@@ -46,14 +46,17 @@ export default function ClubManagePage({ params }: { params: Params }) {
   const { toast } = useToast()
   const router = useRouter()
   const [confirmMemberId, setConfirmMemberId] = useState<string | null>(null)
-  const [confirmAction, setConfirmAction] = useState<"promote" | "demote" | null>(null)
+  const [confirmAction, setConfirmAction] = useState<"promote" | "demote" | "remove" | null>(null)
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [confirmDeleteDialogOpen, setConfirmDeleteDialogOpen] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState("")
   const [club, setClub] = useState<ClubData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isActionLoading, setIsActionLoading] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [removingMemberName, setRemovingMemberName] = useState<string>("")
+  const [dataRefreshTrigger, setDataRefreshTrigger] = useState(0)
 
   const [inviteLink, setInviteLink] = useState("")
   const [isGeneratingLink, setIsGeneratingLink] = useState(false)
@@ -92,9 +95,10 @@ export default function ClubManagePage({ params }: { params: Params }) {
           .from('club_members')
           .select(`
             id,
+            user_id,
             role,
             joined_at,
-            profiles (
+            user:profiles!user_id(
               id,
               full_name,
               email,
@@ -109,9 +113,11 @@ export default function ClubManagePage({ params }: { params: Params }) {
           throw membersError
         }
         
+        console.log("멤버 데이터 구조 확인:", membersData[0])
+        
         // 현재 사용자가 관리자인지 확인
         const isAdmin = membersData.some(
-          member => member.profiles.id === user.id && (member.role === 'admin' || clubData.created_by === user.id)
+          member => member.user.id === user.id && (member.role === 'admin' || clubData.created_by === user.id)
         )
         
         if (!isAdmin) {
@@ -124,29 +130,52 @@ export default function ClubManagePage({ params }: { params: Params }) {
           return
         }
         
-        // 초대 링크 생성 (실제로는 더 안전한 방법으로 구현해야 함)
-        const generatedInviteLink = `${window.location.origin}/clubs/join?code=${clubId}`
+        try {
+          // 활성화된 초대 코드 조회 시도 - maybeSingle 사용
+          const { data: inviteData, error: inviteError } = await supabase
+            .from('club_invites')
+            .select('code')
+            .eq('club_id', clubId)
+            .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle() // 결과가 없을 수도 있음
+          
+          // 초대 코드가 있는 경우 해당 코드 사용
+          if (!inviteError && inviteData) {
+            setInviteLink(`${window.location.origin}/clubs/join?code=${inviteData.code}`)
+          } else {
+            console.log("유효한 초대 코드를 찾지 못했습니다. 기본 링크 사용:", inviteError);
+            // 초대 코드가 없으면 동아리 ID를 사용한 기본 링크 생성
+            setInviteLink(`${window.location.origin}/clubs/join?code=${clubId}`)
+          }
+        } catch (inviteError) {
+          console.error("초대 코드 조회 오류:", inviteError);
+          setInviteLink(`${window.location.origin}/clubs/join?code=${clubId}`)
+        }
         
         // 멤버 정보 포맷팅
-        const formattedMembers: ClubMember[] = membersData.map(member => ({
-          id: member.profiles.id,
-          name: member.profiles.full_name || '이름 없음',
-          role: member.role === 'admin' ? '관리자' : '회원',
-          joinedAt: new Date(member.joined_at).toLocaleDateString('ko-KR'),
-          email: member.profiles.email || '',
-          school: member.profiles.school || '',
-          department: member.profiles.department || '',
-        }))
+        const formattedMembers: ClubMember[] = membersData.map(member => {
+          console.log('멤버 데이터:', member);
+          return {
+            id: member.user_id,
+            name: member.user?.full_name || '이름 없음',
+            role: member.role === 'admin' ? '관리자' : '회원',
+            joinedAt: new Date(member.joined_at).toLocaleDateString('ko-KR'),
+            email: member.user?.email || '',
+            school: member.user?.school || '',
+            department: member.user?.department || '',
+          };
+        })
         
         setClub({
           id: clubData.id,
           name: clubData.name,
           description: clubData.description || '',
-          inviteLink: generatedInviteLink,
+          inviteLink: inviteLink || `${window.location.origin}/clubs/join?code=${clubId}`,
           members: formattedMembers,
         })
         
-        setInviteLink(generatedInviteLink)
       } catch (error: any) {
         toast({
           title: "데이터 로딩 실패",
@@ -159,7 +188,7 @@ export default function ClubManagePage({ params }: { params: Params }) {
     }
     
     fetchClubData()
-  }, [clubId, router, toast])
+  }, [clubId, router, toast, inviteLink, dataRefreshTrigger])
 
   // 초대 링크 복사
   const handleCopyInviteLink = () => {
@@ -187,48 +216,54 @@ export default function ClubManagePage({ params }: { params: Params }) {
         return
       }
       
-      // 고유한 초대 코드 생성 (더 명확하고 고유한 형식)
-      const randomPart = Math.random().toString(36).substring(2, 8);
-      const inviteCode = `${clubId.slice(0, 8)}-${randomPart}`;
-      
+      // 고유한 초대 코드 생성 - UUID 형식 사용
+      const inviteCode = `${clubId.slice(0, 8)}-${Math.random().toString(36).substring(2, 8)}`;
       console.log("생성할 초대 코드:", inviteCode);
       
-      // 기존 초대 코드 비활성화
-      await supabase
-        .from('club_invites')
-        .update({ is_active: false })
-        .eq('club_id', clubId)
-      
-      // 새 초대 코드 생성
-      const { data: inviteData, error: inviteError } = await supabase
-        .from('club_invites')
-        .insert([
-          {
+      try {
+        // 기존 초대 코드 비활성화
+        const { error: updateError } = await supabase
+          .from('club_invites')
+          .update({ is_active: false })
+          .eq('club_id', clubId);
+          
+        if (updateError) {
+          console.error("기존 초대 코드 비활성화 오류:", updateError);
+          // 기존 초대 코드가 없을 수 있으므로 오류를 무시하고 계속 진행
+        }
+        
+        // 새 초대 코드 생성
+        const { data: inviteData, error: inviteError } = await supabase
+          .from('club_invites')
+          .insert({
             club_id: clubId,
             code: inviteCode,
             created_by: user.id,
             expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30일 후 만료
             is_active: true
-          }
-        ])
-        .select()
-        .single()
-      
-      if (inviteError) {
-        console.error("초대 코드 생성 오류:", inviteError);
-        throw inviteError;
-      }
-      
-      console.log("생성된 초대 정보:", inviteData);
-      
-      // 초대 링크 업데이트
-      const newLink = `${window.location.origin}/clubs/join?code=${inviteCode}`;
-      setInviteLink(newLink);
+          })
+          .select('id, code, created_at')
+          .single();
+        
+        if (inviteError) {
+          console.error("초대 코드 생성 오류:", inviteError);
+          throw inviteError;
+        }
+        
+        console.log("생성된 초대 정보:", inviteData);
+        
+        // 초대 링크 업데이트
+        const newLink = `${window.location.origin}/clubs/join?code=${inviteCode}`;
+        setInviteLink(newLink);
 
-      toast({
-        title: "초대 링크 재생성 완료",
-        description: "새로운 초대 링크가 생성되었습니다.",
-      })
+        toast({
+          title: "초대 링크 재생성 완료",
+          description: "새로운 초대 링크가 생성되었습니다.",
+        })
+      } catch (dbError: any) {
+        console.error("데이터베이스 작업 오류:", dbError);
+        throw new Error(dbError.message || "초대 링크 생성 중 오류가 발생했습니다.");
+      }
     } catch (error: any) {
       console.error("초대 링크 생성 오류:", error);
       toast({
@@ -242,25 +277,54 @@ export default function ClubManagePage({ params }: { params: Params }) {
   }
 
   // 멤버 제거
-  const handleRemoveMember = async (memberId: string) => {
+  const handleRemoveMember = async () => {
+    if (!confirmMemberId) return
+
+    setIsActionLoading(true)
     try {
+      console.log('멤버 제거 시도:', {
+        club_id: clubId,
+        user_id: confirmMemberId
+      });
+      
+      // 해당 멤버의 club_members 레코드 ID 조회
+      const { data: memberRecord, error: fetchError } = await supabase
+        .from('club_members')
+        .select('id')
+        .eq('club_id', clubId)
+        .eq('user_id', confirmMemberId)
+        .single();
+      
+      if (fetchError) {
+        console.error('멤버 레코드 조회 오류:', fetchError);
+        throw fetchError;
+      }
+      
+      if (!memberRecord) {
+        throw new Error('해당 멤버의 레코드를 찾을 수 없습니다.');
+      }
+      
+      console.log('조회된 멤버 레코드:', memberRecord);
+      
       // 데이터베이스에서 멤버 제거
-      const { error } = await supabase
+      const { data: deleteData, error } = await supabase
         .from('club_members')
         .delete()
-        .eq('club_id', clubId)
-        .eq('user_id', memberId)
-        
+        .eq('id', memberRecord.id)
+        .select();
+      
       if (error) {
-        console.error('멤버 제거 오류:', error)
-        throw error
+        console.error('멤버 제거 오류:', error);
+        throw error;
       }
+      
+      console.log('멤버 제거 성공:', deleteData);
       
       // 멤버 목록 업데이트
       if (club) {
         setClub({
           ...club,
-          members: club.members.filter(member => member.id !== memberId)
+          members: club.members.filter(member => member.id !== confirmMemberId)
         })
       }
 
@@ -268,12 +332,21 @@ export default function ClubManagePage({ params }: { params: Params }) {
         title: "멤버 제거 완료",
         description: "멤버가 동아리에서 제거되었습니다.",
       })
+      
+      // 데이터 갱신 트리거
+      setDataRefreshTrigger((prev) => prev + 1)
     } catch (error: any) {
+      console.error('멤버 제거 실패:', error);
       toast({
         title: "멤버 제거 실패",
         description: error.message || "멤버를 제거하는 도중 오류가 발생했습니다.",
         variant: "destructive",
       })
+    } finally {
+      setIsActionLoading(false)
+      setConfirmDialogOpen(false)
+      setConfirmMemberId(null)
+      setConfirmAction(null)
     }
   }
 
@@ -291,6 +364,14 @@ export default function ClubManagePage({ params }: { params: Params }) {
     setConfirmDialogOpen(true)
   }
 
+  // 멤버 제거 다이얼로그 열기
+  const openRemoveDialog = (memberId: string, memberName: string) => {
+    setConfirmMemberId(memberId)
+    setRemovingMemberName(memberName)
+    setConfirmAction("remove")
+    setConfirmDialogOpen(true)
+  }
+
   // 동아리 삭제 다이얼로그 열기
   const openDeleteDialog = () => {
     setDeleteConfirmText("")
@@ -300,18 +381,60 @@ export default function ClubManagePage({ params }: { params: Params }) {
   // 역할 변경 처리
   const handleRoleChange = async () => {
     if (confirmMemberId && confirmAction && club) {
+      setIsActionLoading(true)
       try {
-        // 데이터베이스에서 역할 변경
-        const { error } = await supabase
+        console.log('역할 변경 시도:', {
+          club_id: clubId,
+          user_id: confirmMemberId,
+          new_role: confirmAction === "promote" ? 'admin' : 'member'
+        });
+        
+        // 해당 멤버의 club_members 레코드 ID 조회
+        const { data: memberRecord, error: fetchError } = await supabase
           .from('club_members')
-          .update({ role: confirmAction === "promote" ? 'admin' : 'member' })
+          .select('id')
           .eq('club_id', clubId)
           .eq('user_id', confirmMemberId)
-          
-        if (error) {
-          console.error('역할 변경 오류:', error)
-          throw error
+          .single();
+        
+        if (fetchError) {
+          console.error('멤버 레코드 조회 오류:', fetchError);
+          throw fetchError;
         }
+        
+        if (!memberRecord) {
+          throw new Error('해당 멤버의 레코드를 찾을 수 없습니다.');
+        }
+        
+        console.log('조회된 멤버 레코드:', memberRecord);
+        
+        // 데이터베이스에서 역할 변경 (RLS 권한 문제 확인용 로깅 추가)
+        const newRole = confirmAction === "promote" ? 'admin' : 'member';
+        console.log(`역할 업데이트 시도: record_id=${memberRecord.id}, new_role=${newRole}`);
+        
+        const { data: updateData, error } = await supabase
+          .from('club_members')
+          .update({ 
+            role: newRole,
+            // 타임스탬프를 변경하여 업데이트가 확실하게 적용되도록 함
+            joined_at: new Date().toISOString() 
+          })
+          .eq('id', memberRecord.id);
+        
+        // 업데이트 후 바로 데이터 확인
+        const { data: verifyData, error: verifyError } = await supabase
+          .from('club_members')
+          .select('role')
+          .eq('id', memberRecord.id)
+          .single();
+        
+        if (error) {
+          console.error('역할 변경 오류:', error);
+          throw error;
+        }
+        
+        console.log('역할 변경 결과:', updateData);
+        console.log('업데이트 후 역할 확인:', verifyData);
         
         // 멤버 목록 업데이트
         setClub({
@@ -321,7 +444,7 @@ export default function ClubManagePage({ params }: { params: Params }) {
               ? { ...member, role: confirmAction === "promote" ? "관리자" : "회원" } 
               : member
           )
-        })
+        });
 
         toast({
           title: confirmAction === "promote" ? "관리자 권한 부여 완료" : "일반 회원으로 변경 완료",
@@ -329,17 +452,22 @@ export default function ClubManagePage({ params }: { params: Params }) {
             confirmAction === "promote"
               ? "선택한 멤버가 관리자로 변경되었습니다."
               : "선택한 멤버가 일반 회원으로 변경되었습니다.",
-        })
+        });
+        
+        // 데이터 갱신 트리거 - 서버에서 최신 데이터 다시 불러오기
+        setDataRefreshTrigger(prev => prev + 1);
       } catch (error: any) {
+        console.error('역할 변경 실패:', error);
         toast({
           title: "역할 변경 실패",
           description: error.message || "역할을 변경하는 도중 오류가 발생했습니다.",
           variant: "destructive",
         })
       } finally {
-        setConfirmDialogOpen(false)
-        setConfirmMemberId(null)
-        setConfirmAction(null)
+        setIsActionLoading(false);
+        setConfirmDialogOpen(false);
+        setConfirmMemberId(null);
+        setConfirmAction(null);
       }
     }
   }
@@ -456,7 +584,7 @@ export default function ClubManagePage({ params }: { params: Params }) {
                         ) : null}
 
                         {member.id !== currentUserId && ( // 자기 자신은 제거 불가
-                          <Button variant="outline" size="sm" onClick={() => handleRemoveMember(member.id)}>
+                          <Button variant="outline" size="sm" onClick={() => openRemoveDialog(member.id, member.name)}>
                             <UserMinus className="h-4 w-4 mr-2" />
                             제거
                           </Button>
@@ -533,19 +661,31 @@ export default function ClubManagePage({ params }: { params: Params }) {
       <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{confirmAction === "promote" ? "관리자 권한 부여" : "일반 회원으로 변경"}</DialogTitle>
+            <DialogTitle>
+              {confirmAction === "promote"
+                ? "관리자 권한 부여"
+                : confirmAction === "demote"
+                ? "일반 회원으로 변경"
+                : "멤버 제거"}
+            </DialogTitle>
             <DialogDescription>
               {confirmAction === "promote"
                 ? "선택한 멤버에게 관리자 권한을 부여하시겠습니까? 관리자는 동아리 설정, 멤버 관리, 출석 세션 생성 등의 권한을 갖게 됩니다."
-                : "선택한 멤버를 일반 회원으로 변경하시겠습니까? 일반 회원은 동아리 관리 권한이 제한됩니다."}
+                : confirmAction === "demote"
+                ? "선택한 멤버를 일반 회원으로 변경하시겠습니까? 일반 회원은 동아리 관리 권한이 제한됩니다."
+                : `멤버 "${removingMemberName}"을(를) 동아리에서 제거하시겠습니까?`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setConfirmDialogOpen(false)} className="w-full sm:w-auto">
               취소
             </Button>
-            <Button onClick={handleRoleChange} className="w-full sm:w-auto">
-              확인
+            <Button
+              onClick={confirmAction === "remove" ? handleRemoveMember : handleRoleChange}
+              disabled={isActionLoading}
+              className="w-full sm:w-auto"
+            >
+              {isActionLoading ? "처리 중..." : "확인"}
             </Button>
           </DialogFooter>
         </DialogContent>
