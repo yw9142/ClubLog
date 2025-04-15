@@ -2,11 +2,30 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from "next/link"
 import { CheckCircle, QrCode, Users } from "lucide-react"
+import { getServerSession } from "@/lib/supabase-server"
+import { redirect } from "next/navigation"
+import AuthRedirect from "@/components/auth-redirect"
 
-export default function Home() {
+export default async function Home() {
+  try {
+    // 서버 컴포넌트용 세션 정보 확인
+    const { data: { session } } = await getServerSession();
+    
+    // 세션이 있으면 (로그인 상태라면) dashboard로 리다이렉트
+    if (session) {
+      redirect("/dashboard");
+    }
+  } catch (error) {
+    // 서버 측 리다이렉션 실패 시 콘솔에 오류 로그 남김
+    // 클라이언트 측 리다이렉션이 백업으로 작동함
+    console.error("서버 측 세션 체크 실패:", error);
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+      {/* 클라이언트 측 리다이렉션 백업 */}
+      <AuthRedirect />
+      
       <header className="container mx-auto py-6 px-4">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-blue-700">동아리 출석 체크</h1>
@@ -22,6 +41,9 @@ export default function Home() {
           <div className="flex justify-center gap-4">
             <Button size="lg" asChild>
               <Link href="/signup">시작하기</Link>
+            </Button>
+            <Button size="lg" variant="outline" asChild>
+              <Link href="/login">로그인</Link>
             </Button>
           </div>
         </section>

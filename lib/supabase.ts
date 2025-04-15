@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient as createClientOriginal } from '@supabase/supabase-js';
 
 // 환경 변수 로드
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -10,8 +10,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error('환경 변수:', { supabaseUrl, supabaseAnonKey: supabaseAnonKey ? '[설정됨]' : '[설정되지 않음]' });
 }
 
-// Supabase 클라이언트 생성
-export const supabase = createClient(
+// 브라우저용 Supabase 클라이언트 생성
+export const supabase = createClientOriginal(
   supabaseUrl || '',
   supabaseAnonKey || '',
   {
@@ -26,7 +26,7 @@ export const supabase = createClient(
 // 서버 사이드용 서비스 롤 클라이언트
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY as string;
 export const supabaseAdmin = supabaseServiceKey 
-  ? createClient(supabaseUrl || '', supabaseServiceKey, {
+  ? createClientOriginal(supabaseUrl || '', supabaseServiceKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
