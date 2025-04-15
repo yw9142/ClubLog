@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabase';
 // 실시간 출석 상태 조회 훅
 export function useRealtimeAttendance(sessionId: string | undefined) {
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const [realTimeData, setRealTimeData] = useState<any[]>([]);
+  const [lastUpdate, setLastUpdate] = useState<number>(Date.now());
 
   // 출석 기록 데이터 가져오기
   const fetcher = async (key: string) => {
@@ -14,11 +16,17 @@ export function useRealtimeAttendance(sessionId: string | undefined) {
     if (!id) return [];
     
     const { data, error } = await supabase
-      .from('attendance_records')
+      .from('attendances')
       .select('*, profiles(*)')
       .eq('session_id', id);
     
     if (error) throw error;
+    
+    // 실시간 데이터가 있으면 우선 사용
+    if (realTimeData.length > 0) {
+      return realTimeData;
+    }
+    
     return data;
   };
 
@@ -26,35 +34,63 @@ export function useRealtimeAttendance(sessionId: string | undefined) {
     sessionId ? `attendance/${sessionId}` : null,
     fetcher,
     {
-      refreshInterval: 5000, // 5초마다 자동 갱신
+      refreshInterval: 3000, // 3초마다 자동 갱신
       revalidateOnFocus: true,
-      dedupingInterval: 2000, // 2초 내에 중복 요청 방지
+      dedupingInterval: 1000, // 1초 내에 중복 요청 방지
+      refreshWhenHidden: true,
+      revalidateOnReconnect: true,
+      shouldRetryOnError: true,
     }
   );
+
+  // 직접 데이터를 다시 가져오는 함수
+  const fetchLatestData = async () => {
+    if (!sessionId) return;
+    
+    try {
+      const { data: freshData, error: fetchError } = await supabase
+        .from('attendances')
+        .select('*, profiles(*)')
+        .eq('session_id', sessionId);
+      
+      if (fetchError) throw fetchError;
+      
+      if (freshData) {
+        setRealTimeData(freshData);
+        setLastUpdate(Date.now());
+        // SWR 캐시도 강제로 업데이트
+        mutate(freshData, false);
+      }
+    } catch (err) {
+      console.error('출석 데이터 가져오기 실패:', err);
+    }
+  };
 
   // 실시간 업데이트를 위한 Supabase 구독 설정
   useEffect(() => {
     if (!sessionId || isSubscribed) return;
 
     const channel = supabase
-      .channel(`attendance_${sessionId}`)
+      .channel(`attendance_${sessionId}_${Date.now()}`) // 고유 채널명 생성
       .on('postgres_changes', 
         { 
           event: '*', 
           schema: 'public', 
-          table: 'attendance_records', 
+          table: 'attendances', 
           filter: `session_id=eq.${sessionId}` 
         },
         (payload) => {
           console.log('실시간 출석 데이터 변경:', payload);
-          // 데이터 변경 감지 시 캐시 갱신
-          mutate();
+          // 데이터 변경 감지 시 즉시 최신 데이터 가져오기
+          fetchLatestData();
         }
       )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           console.log(`출석 세션 ${sessionId}에 대한 실시간 구독 활성화`);
           setIsSubscribed(true);
+          // 구독 시작 시 최신 데이터 가져오기
+          fetchLatestData();
         }
       });
 
@@ -64,14 +100,24 @@ export function useRealtimeAttendance(sessionId: string | undefined) {
       channel.unsubscribe();
       setIsSubscribed(false);
     };
-  }, [sessionId, mutate, isSubscribed]);
+  }, [sessionId]);
+
+  // lastUpdate가 변경될 때마다 데이터 갱신
+  useEffect(() => {
+    if (data && lastUpdate) {
+      mutate();
+    }
+  }, [lastUpdate, mutate]);
+
+  // 실제로 사용할 데이터 (실시간 데이터가 있으면 우선 사용)
+  const records = realTimeData.length > 0 ? realTimeData : (data || []);
 
   return {
-    records: data || [],
-    isLoading: !error && !data,
+    records: records,
+    isLoading: !error && !data && realTimeData.length === 0,
     isError: !!error,
     error,
-    refresh: mutate,
+    refresh: fetchLatestData, // 직접 갱신 함수 제공
     isSubscribed
   };
 }

@@ -234,3 +234,159 @@ export const useCreateAttendanceSession = () => {
     },
   });
 };
+
+// 대시보드용 사용자 동아리 정보 조회 훅
+export const useDashboardClubs = (userId: string | undefined) => {
+  return useQuery({
+    queryKey: ['dashboard-clubs', userId],
+    queryFn: async () => {
+      if (!userId) return { clubs: [], adminClubs: 0 };
+      
+      const { data: clubMembers, error } = await supabase
+        .from('club_members')
+        .select(`
+          role,
+          clubs (
+            id,
+            name
+          )
+        `)
+        .eq('user_id', userId);
+      
+      if (error) throw error;
+      
+      // 각 동아리 멤버 수 가져오기 - 병렬로 조회
+      const clubsWithMemberCount = await Promise.all(
+        clubMembers.map(async (member) => {
+          const { count, error: countError } = await supabase
+            .from('club_members')
+            .select('*', { count: 'exact', head: true })
+            .eq('club_id', member.clubs.id);
+          
+          if (countError) throw countError;
+          
+          return {
+            id: member.clubs.id,
+            name: member.clubs.name,
+            memberCount: count || 0,
+            role: member.role === 'admin' ? '관리자' : '회원'
+          };
+        })
+      );
+      
+      const adminClubs = clubsWithMemberCount.filter(club => club.role === '관리자').length;
+      
+      return {
+        clubs: clubsWithMemberCount,
+        adminClubs
+      };
+    },
+    enabled: !!userId,
+  });
+};
+
+// 최근 출석 기록 조회 훅
+export const useRecentAttendance = (userId: string | undefined, limit = 3) => {
+  return useQuery({
+    queryKey: ['recent-attendance', userId, limit],
+    queryFn: async () => {
+      if (!userId) return [];
+      
+      const { data, error } = await supabase
+        .from('attendances')
+        .select(`
+          id,
+          status,
+          attendance_sessions (
+            start_time,
+            clubs (
+              name
+            )
+          )
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      
+      if (error) throw error;
+      
+      return data.map(record => ({
+        id: record.id,
+        clubName: record.attendance_sessions.clubs.name,
+        date: new Date(record.attendance_sessions.start_time).toLocaleDateString('ko-KR'),
+        status: record.status === 'present' ? '출석' : 
+                record.status === 'late' ? '지각' : 
+                record.status === 'excused' ? '사유결석' : '결석',
+      }));
+    },
+    enabled: !!userId,
+  });
+};
+
+// 출석률 조회 훅
+export const useAttendanceRate = (userId: string | undefined, clubIds: string[] = []) => {
+  return useQuery({
+    queryKey: ['attendance-rate', userId, clubIds],
+    queryFn: async () => {
+      if (!userId || clubIds.length === 0) return 0;
+      
+      const now = new Date();
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      
+      // 전체 출석 세션 수
+      const { data: allSessions, error: sessionsError } = await supabase
+        .from('attendance_sessions')
+        .select('id')
+        .gte('start_time', firstDayOfMonth)
+        .in('club_id', clubIds);
+      
+      if (sessionsError) throw sessionsError;
+      
+      if (!allSessions || allSessions.length === 0) return 0;
+      
+      // 출석한 세션 수
+      const { data: attendedSessions, error: attendedError } = await supabase
+        .from('attendances')
+        .select(`
+          id,
+          attendance_sessions!inner (
+            id,
+            start_time
+          )
+        `)
+        .gte('attendance_sessions.start_time', firstDayOfMonth)
+        .eq('user_id', userId)
+        .in('status', ['present', 'late']);
+      
+      if (attendedError) throw attendedError;
+      
+      const attendedCount = attendedSessions ? attendedSessions.length : 0;
+      const rate = Math.round((attendedCount / allSessions.length) * 100);
+      
+      return rate;
+    },
+    enabled: !!userId && clubIds.length > 0,
+  });
+};
+
+// 다가오는 일정 수 조회 훅
+export const useUpcomingEvents = (clubIds: string[] = []) => {
+  return useQuery({
+    queryKey: ['upcoming-events', clubIds],
+    queryFn: async () => {
+      if (clubIds.length === 0) return 0;
+      
+      const now = new Date().toISOString();
+      const { count, error } = await supabase
+        .from('attendance_sessions')
+        .select('*', { count: 'exact', head: true })
+        .gt('start_time', now)
+        .in('club_id', clubIds);
+      
+      if (error) throw error;
+      
+      return count || 0;
+    },
+    enabled: clubIds.length > 0,
+  });
+};

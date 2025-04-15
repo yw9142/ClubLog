@@ -1,6 +1,5 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from "next/link"
@@ -8,184 +7,48 @@ import { CalendarDays, QrCode, Users, BarChart3 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { useToast } from "@/components/ui/use-toast"
-
-interface Club {
-  id: string
-  name: string
-  memberCount: number
-  role: string
-}
-
-interface AttendanceRecord {
-  id: string
-  clubName: string
-  date: string
-  status: string
-}
+import { useDashboardClubs, useRecentAttendance, useAttendanceRate, useUpcomingEvents } from "@/hooks/use-query-hooks"
+import { useEffect, useState } from "react"
 
 export default function DashboardPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const [clubs, setClubs] = useState<Club[]>([])
-  const [recentAttendance, setRecentAttendance] = useState<AttendanceRecord[]>([])
-  const [attendanceRate, setAttendanceRate] = useState(0)
-  const [upcomingEvents, setUpcomingEvents] = useState(0)
-  const [isLoading, setIsLoading] = useState(true)
+  const [userId, setUserId] = useState<string | undefined>(undefined)
 
   useEffect(() => {
-    async function fetchDashboardData() {
-      try {
-        setIsLoading(true)
-        
-        // 사용자 정보 가져오기
-        const { data: { user } } = await supabase.auth.getUser()
-        
-        if (!user) {
-          console.error("로그인되지 않은 사용자")
-          router.push("/login")
-          return
-        }
-
-        // 가입한 동아리 정보 가져오기
-        const { data: clubMembers, error: clubsError } = await supabase
-          .from('club_members')
-          .select(`
-            role,
-            clubs (
-              id,
-              name
-            )
-          `)
-          .eq('user_id', user.id)
-
-        if (clubsError) {
-          console.error("동아리 정보 조회 오류:", clubsError)
-          throw clubsError
-        }
-
-        // 각 동아리 멤버 수 가져오기 - 병렬로 조회
-        const clubsWithMemberCount = await Promise.all(
-          clubMembers.map(async (member) => {
-            const { count, error: countError } = await supabase
-              .from('club_members')
-              .select('*', { count: 'exact', head: true })
-              .eq('club_id', member.clubs.id)
-            
-            return {
-              id: member.clubs.id,
-              name: member.clubs.name,
-              memberCount: count || 0,
-              role: member.role === 'admin' ? '관리자' : '회원'
-            }
-          })
-        )
-
-        // 최근 출석 기록 가져오기 (최대 3개)
-        const { data: attendanceData, error: attendanceError } = await supabase
-          .from('attendances')
-          .select(`
-            id,
-            status,
-            attendance_sessions (
-              start_time,
-              clubs (
-                name
-              )
-            )
-          `)
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(3)
-
-        if (attendanceError) {
-          console.error("출석 기록 조회 오류:", attendanceError)
-          throw attendanceError
-        }
-
-        // 이번 달 출석률 계산
-        const now = new Date()
-        const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-        
-        // 전체 출석 세션 수
-        const { data: allSessions, error: sessionsError } = await supabase
-          .from('attendance_sessions')
-          .select('id')
-          .gte('start_time', firstDayOfMonth)
-          .in('club_id', clubsWithMemberCount.map(club => club.id))
-
-        if (sessionsError) {
-          console.error("출석 세션 조회 오류:", sessionsError)
-          throw sessionsError
-        }
-
-        // 출석한 세션 수
-        const { data: attendedSessions, error: attendedError } = await supabase
-          .from('attendances')
-          .select(`
-            id,
-            attendance_sessions!inner (
-              id,
-              start_time
-            )
-          `)
-          .gte('attendance_sessions.start_time', firstDayOfMonth)
-          .eq('user_id', user.id)
-          .in('status', ['present', 'late'])
-
-        if (attendedError) {
-          console.error("출석 세션 조회 오류:", attendedError)
-          throw attendedError
-        }
-
-        // 다가오는 출석 세션 수 계산
-        const now2 = new Date().toISOString()
-        const { count: upcomingCount, error: upcomingError } = await supabase
-          .from('attendance_sessions')
-          .select('*', { count: 'exact', head: true })
-          .gt('start_time', now2)
-          .in('club_id', clubsWithMemberCount.map(club => club.id))
-
-        if (upcomingError) {
-          console.error("다가오는 세션 조회 오류:", upcomingError)
-          throw upcomingError
-        }
-
-        // 포맷팅
-        const formattedAttendance = attendanceData.map(record => ({
-          id: record.id,
-          clubName: record.attendance_sessions.clubs.name,
-          date: new Date(record.attendance_sessions.start_time).toLocaleDateString('ko-KR'),
-          status: record.status === 'present' ? '출석' : 
-                  record.status === 'late' ? '지각' : 
-                  record.status === 'excused' ? '사유결석' : '결석',
-        }))
-
-        // 출석률 계산
-        let rate = 0
-        if (allSessions && allSessions.length > 0) {
-          const attendedCount = attendedSessions ? attendedSessions.length : 0
-          rate = Math.round((attendedCount / allSessions.length) * 100)
-        }
-
-        setClubs(clubsWithMemberCount)
-        setRecentAttendance(formattedAttendance)
-        setAttendanceRate(rate)
-        setUpcomingEvents(upcomingCount || 0)
-
-      } catch (error: any) {
-        console.error('대시보드 데이터 로딩 오류:', error)
-        toast({
-          title: "데이터 로딩 실패",
-          description: error.message || "데이터를 불러오는 도중 오류가 발생했습니다.",
-          variant: "destructive",
-        })
-      } finally {
-        setIsLoading(false)
+    async function getUserId() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push("/login")
+        return
       }
+      setUserId(user.id)
     }
+    getUserId()
+  }, [router])
 
-    fetchDashboardData()
-  }, [router, toast])
+  // React Query 훅 사용
+  const { 
+    data: clubsData = { clubs: [], adminClubs: 0 }, 
+    isLoading: isLoadingClubs 
+  } = useDashboardClubs(userId)
+  
+  const { 
+    data: recentAttendance = [], 
+    isLoading: isLoadingAttendance 
+  } = useRecentAttendance(userId)
+  
+  const { 
+    data: attendanceRate = 0, 
+    isLoading: isLoadingRate 
+  } = useAttendanceRate(userId, clubsData.clubs.map(club => club.id))
+  
+  const { 
+    data: upcomingEvents = 0, 
+    isLoading: isLoadingEvents 
+  } = useUpcomingEvents(clubsData.clubs.map(club => club.id))
+
+  const isLoading = isLoadingClubs || isLoadingAttendance || isLoadingRate || isLoadingEvents || !userId
 
   const handleScanQR = () => {
     router.push("/attendance/scan")
@@ -229,13 +92,13 @@ export default function DashboardPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {isLoading ? (
+            {isLoadingClubs ? (
               <div className="flex justify-center items-center h-8">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
               </div>
             ) : (
               <>
-                <div className="text-2xl font-bold">{clubs.length}</div>
+                <div className="text-2xl font-bold">{clubsData.clubs.length}</div>
                 <p className="text-xs text-muted-foreground">가입한 동아리 수</p>
               </>
             )}
@@ -247,13 +110,13 @@ export default function DashboardPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {isLoading ? (
+            {isLoadingClubs ? (
               <div className="flex justify-center items-center h-8">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
               </div>
             ) : (
               <>
-                <div className="text-2xl font-bold">{clubs.filter((club) => club.role === "관리자").length}</div>
+                <div className="text-2xl font-bold">{clubsData.adminClubs}</div>
                 <p className="text-xs text-muted-foreground">내가 관리하는 동아리 수</p>
               </>
             )}
@@ -265,7 +128,7 @@ export default function DashboardPage() {
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {isLoading ? (
+            {isLoadingRate ? (
               <div className="flex justify-center items-center h-8">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
               </div>
@@ -283,7 +146,7 @@ export default function DashboardPage() {
             <CalendarDays className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {isLoading ? (
+            {isLoadingEvents ? (
               <div className="flex justify-center items-center h-8">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
               </div>
@@ -304,11 +167,11 @@ export default function DashboardPage() {
             <CardDescription>가입한 동아리 목록</CardDescription>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
+            {isLoadingClubs ? (
               <LoadingUI />
-            ) : clubs.length > 0 ? (
+            ) : clubsData.clubs.length > 0 ? (
               <div className="space-y-4">
-                {clubs.map((club) => (
+                {clubsData.clubs.map((club) => (
                   <div key={club.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
                     <div>
                       <h3 className="font-medium">{club.name}</h3>
@@ -344,7 +207,7 @@ export default function DashboardPage() {
             <CardDescription>최근 출석 현황</CardDescription>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
+            {isLoadingAttendance ? (
               <LoadingUI />
             ) : recentAttendance.length > 0 ? (
               <div className="space-y-4">

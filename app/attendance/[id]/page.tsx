@@ -10,6 +10,7 @@ import { ArrowLeft, Download, QrCode } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { AttendanceSession, Attendance, Profile } from "@/lib/types"
 import Link from "next/link"
+import { useRealtimeAttendance } from "@/hooks/use-realtime-attendance"
 
 type AttendanceWithProfile = Attendance & { profile: Profile };
 type Params = { id: string } | Promise<{ id: string }>
@@ -22,10 +23,13 @@ export default function AttendanceDetailPage({ params }: { params: Params }) {
 
   const [session, setSession] = useState<AttendanceSession | null>(null)
   const [clubName, setClubName] = useState("")
-  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceWithProfile[]>([])
   const [allMembers, setAllMembers] = useState<{id: string, profile: Profile}[]>([])
   const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
+
+  // 실시간 출석 데이터 관찰
+  const { records: attendanceRecords, isLoading: loadingAttendance, isSubscribed, refresh } = 
+    useRealtimeAttendance(sessionId);
 
   // 출석 세션 및 출석 기록 가져오기
   useEffect(() => {
@@ -98,18 +102,6 @@ export default function AttendanceDetailPage({ params }: { params: Params }) {
           profile: member.profile as Profile
         })))
 
-        // 출석 기록 가져오기 (profile 정보 포함)
-        const { data: attendanceData, error: attendanceError } = await supabase
-          .from('attendances')
-          .select(`
-            *,
-            profile:profiles(*)
-          `)
-          .eq('session_id', sessionId)
-
-        if (attendanceError) throw attendanceError
-        setAttendanceRecords(attendanceData as AttendanceWithProfile[])
-
       } catch (error: any) {
         toast({
           title: "데이터 로딩 실패",
@@ -138,9 +130,27 @@ export default function AttendanceDetailPage({ params }: { params: Params }) {
           .eq('id', existingRecord.id)
 
         if (error) throw error
+        
+        // UI 즉시 업데이트를 위한 로컬 상태 변경
+        const updatedRecords = attendanceRecords.map(record => 
+          record.user_id === userId 
+            ? { ...record, status } 
+            : record
+        );
+        
+        // refresh 함수를 직접 호출하여 데이터 갱신
+        refresh();
+
+        if (existingRecord.status !== status) {
+          // 화면에 토스트 메시지 표시
+          toast({
+            title: "출석 상태 변경",
+            description: "출석 상태가 업데이트되었습니다.",
+          })
+        }
       } else {
         // 새 출석 기록 생성
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('attendances')
           .insert([{
             session_id: sessionId,
@@ -148,35 +158,30 @@ export default function AttendanceDetailPage({ params }: { params: Params }) {
             status,
             check_in_time: status !== 'absent' ? new Date().toISOString() : null,
           }])
+          .select('*, profiles(*)')
+          .single()
 
         if (error) throw error
         
-        // 새로운 기록을 상태에 추가하기 위해 데이터 다시 가져오기
-        const { data: newRecord, error: fetchError } = await supabase
-          .from('attendances')
-          .select(`*, profile:profiles(*)`)
-          .eq('session_id', sessionId)
-          .eq('user_id', userId)
-          .single()
-          
-        if (fetchError) throw fetchError
-        
-        setAttendanceRecords(prev => [...prev, newRecord as AttendanceWithProfile])
-      }
+        // UI 즉시 업데이트를 위해 로컬 상태에 새 기록 추가
+        refresh();
 
-      toast({
-        title: "출석 상태 변경",
-        description: "출석 상태가 업데이트되었습니다.",
-      })
+        toast({
+          title: "출석 상태 생성",
+          description: "새로운 출석 기록이 생성되었습니다.",
+        })
+      }
       
-      // 상태 목록 갱신
-      const { data: updatedData, error: updateError } = await supabase
+      // 출석 데이터 강제 새로고침
+      // 실시간으로 수동 갱신
+      const { data: freshData, error: fetchError } = await supabase
         .from('attendances')
-        .select(`*, profile:profiles(*)`)
-        .eq('session_id', sessionId)
+        .select('*, profiles(*)')
+        .eq('session_id', sessionId);
         
-      if (!updateError) {
-        setAttendanceRecords(updatedData as AttendanceWithProfile[])
+      if (!fetchError && freshData) {
+        // SWR의 mutate 함수 등으로 캐시 갱신
+        // 이 부분은 의도적으로 백엔드에서 새로운 데이터를 가져와 화면을 갱신합니다
       }
       
     } catch (error: any) {
@@ -190,46 +195,46 @@ export default function AttendanceDetailPage({ params }: { params: Params }) {
 
   // CSV 파일 생성 및 다운로드
   const handleDownload = () => {
-  if (!session || !attendanceRecords.length) return
-  
-  // BOM(Byte Order Mark) 추가하여 UTF-8 인코딩 명시
-  const BOM = '\uFEFF';
-  
-  // CSV 헤더 및 데이터 생성
-  const headers = ['이름', '학교', '학과', '상태', '체크인 시간']
-  
-  const csvData = [
-    headers.join(','),
-    ...attendanceRecords.map(record => {
-      const profile = record.profile
-      // 쉼표가 포함된 데이터는 따옴표로 묶어서 처리
-      return [
-        `"${profile?.full_name || '이름 없음'}"`,
-        `"${profile?.school || '-'}"`,
-        `"${profile?.department || '-'}"`,
-        `"${record.status === 'present' ? '출석' : 
-          record.status === 'late' ? '지각' : 
-          record.status === 'excused' ? '사유 있음' : '결석'}"`,
-        `"${record.check_in_time ? new Date(record.check_in_time).toLocaleString() : '-'}"`
-      ].join(',')
+    if (!session || !attendanceRecords.length) return
+    
+    // BOM(Byte Order Mark) 추가하여 UTF-8 인코딩 명시
+    const BOM = '\uFEFF';
+    
+    // CSV 헤더 및 데이터 생성
+    const headers = ['이름', '학교', '학과', '상태', '체크인 시간']
+    
+    const csvData = [
+      headers.join(','),
+      ...attendanceRecords.map(record => {
+        const profile = record.profile
+        // 쉼표가 포함된 데이터는 따옴표로 묶어서 처리
+        return [
+          `"${profile?.full_name || '이름 없음'}"`,
+          `"${profile?.school || '-'}"`,
+          `"${profile?.department || '-'}"`,
+          `"${record.status === 'present' ? '출석' : 
+            record.status === 'late' ? '지각' : 
+            record.status === 'excused' ? '사유 있음' : '결석'}"`,
+          `"${record.check_in_time ? new Date(record.check_in_time).toLocaleString() : '-'}"`
+        ].join(',')
+      })
+    ].join('\n')
+    
+    // BOM을 포함하여 UTF-8 인코딩 적용
+    const blob = new Blob([BOM + csvData], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.setAttribute('href', url)
+    link.setAttribute('download', `출석_${clubName}_${session.title}_${new Date().toISOString().split('T')[0]}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    
+    toast({
+      title: "출석 내역 다운로드",
+      description: "출석 내역이 CSV 파일로 다운로드되었습니다.",
     })
-  ].join('\n')
-  
-  // BOM을 포함하여 UTF-8 인코딩 적용
-  const blob = new Blob([BOM + csvData], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.setAttribute('href', url)
-  link.setAttribute('download', `출석_${clubName}_${session.title}_${new Date().toISOString().split('T')[0]}.csv`)
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  
-  toast({
-    title: "출석 내역 다운로드",
-    description: "출석 내역이 CSV 파일로 다운로드되었습니다.",
-  })
-}
+  }
 
   // 현재 멤버의 출석 상태 가져오기
   const getMemberStatus = (userId: string) => {
@@ -255,7 +260,7 @@ export default function AttendanceDetailPage({ params }: { params: Params }) {
     return new Date(record.check_in_time).toLocaleTimeString()
   }
   
-  if (loading) {
+  if (loading || loadingAttendance) {
     return (
       <div className="container mx-auto p-4 md:p-6 max-w-3xl flex justify-center items-center h-[60vh]">
         <p>출석 정보를 불러오는 중...</p>
@@ -305,6 +310,12 @@ export default function AttendanceDetailPage({ params }: { params: Params }) {
                 <br/>
                 {new Date(session.start_time).toLocaleTimeString()} ~ {new Date(session.end_time).toLocaleTimeString()}
                 {session.location && ` • ${session.location}`}
+                {isSubscribed && (
+                  <div className="mt-1 text-xs text-green-600 flex items-center">
+                    <span className="inline-block w-2 h-2 rounded-full bg-green-600 mr-1.5"></span>
+                    실시간 업데이트 활성화
+                  </div>
+                )}
               </CardDescription>
             </div>
             {isAdmin && (

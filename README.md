@@ -65,6 +65,11 @@ QR 코드를 활용한 효율적인 동아리 출석 관리 시스템입니다. 
 - **백엔드 서비스**: Supabase (인증, 데이터베이스)
 - **데이터베이스**: PostgreSQL (Supabase)
 
+### 상태 관리 및 데이터 페칭
+- **서버 상태 관리**: TanStack Query (React Query) v5
+- **클라이언트 상태 관리**: Zustand v5
+- **HTTP 클라이언트**: Axios
+
 ### QR 코드 관련
 - **QR 코드 생성**: qrcode.react
 - **QR 코드 스캔**: html5-qrcode
@@ -83,7 +88,7 @@ QR 코드를 활용한 효율적인 동아리 출석 관리 시스템입니다. 
 
 ### 필수 요구사항
 - Node.js 18.0 이상
-- pnpm
+- pnpm 또는 npm
 
 ### 설치 방법
 
@@ -95,7 +100,11 @@ cd ClubLog
 
 2. 의존성 설치
 ```bash
+# pnpm 사용 (권장)
 pnpm install
+
+# 또는 npm 사용
+npm install
 ```
 
 3. 환경 변수 설정
@@ -107,7 +116,11 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<Supabase 익명 키>
 
 4. 개발 서버 실행
 ```bash
+# pnpm 사용
 pnpm dev
+
+# 또는 npm 사용
+npm run dev
 ```
 
 5. 브라우저에서 `http://localhost:3000`으로 접속
@@ -118,8 +131,13 @@ pnpm dev
 ### 빌드 및 배포
 
 ```bash
+# pnpm 사용 (권장)
 pnpm build
 pnpm start
+
+# 또는 npm 사용
+npm run build
+npm start
 ```
 
 ## 프로젝트 구조

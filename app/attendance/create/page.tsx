@@ -19,13 +19,30 @@ export default function CreateAttendancePage() {
   const searchParams = useSearchParams()
   const clubIdParam = searchParams.get("clubId")
 
+  // 날짜와 시간의 기본값 설정을 위한 함수
+  const getDefaultDate = () => {
+    const today = new Date()
+    return today.toISOString().split('T')[0] // YYYY-MM-DD 형식
+  }
+
+  const getDefaultTime = () => {
+    const now = new Date()
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  }
+
+  const getDefaultEndTime = () => {
+    const now = new Date()
+    now.setMinutes(now.getMinutes() + 10) // 현재 시각 + 10분
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  }
+
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [location, setLocation] = useState("")
   const [clubId, setClubId] = useState(clubIdParam || "")
-  const [date, setDate] = useState("")
-  const [startTime, setStartTime] = useState("")
-  const [endTime, setEndTime] = useState("")
+  const [date, setDate] = useState(getDefaultDate())
+  const [startTime, setStartTime] = useState(getDefaultTime())
+  const [endTime, setEndTime] = useState(getDefaultEndTime())
   const [clubs, setClubs] = useState<Club[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingClubs, setIsLoadingClubs] = useState(true)
